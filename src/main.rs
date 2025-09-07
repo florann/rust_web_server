@@ -14,11 +14,11 @@ fn main() {
                     let http_message = HttpMessage::new(stream);
                     match http_message {
                         Ok(http_message) => {
-                            println!("{:?}", String::from_utf8_lossy(&http_message.start_line));
+                            println!("{:?}", &http_message.start_line);
                             for header_field in &http_message.header_field {
-                                println!("{:?}",String::from_utf8_lossy(header_field));
+                                println!("{:?}", header_field);
                             }
-                            let string = String::from_utf8_lossy(&http_message.body).to_string();
+                            let string = http_message.body;
                             println!("{:?}", string);
                         },
                         Err(error) => {

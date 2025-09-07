@@ -94,12 +94,9 @@ impl HttpMessage  {
             str = str.trim().to_string();
 
             body_length = str.parse().unwrap();
-            println!("{}", body_length)
 
-            //let body_length: u16 = body_header_content.parse().unwrap(); 
         }
-        
-        println!("{:?}", body_start);
+
         for i in body_start..body_start+body_length {
              if i >= buf.len()-1 {
                 break;
@@ -110,9 +107,9 @@ impl HttpMessage  {
     
 
         Ok(HttpMessage {
-            start_line : request_line,
-            header_field : vec_header_field,
-            body: body_content
+            start_line : Self::byte_array_to_string(request_line).replace("\0", ""),
+            header_field : Self::vec_byte_array_to_string(vec_header_field).into_iter().map(|str| str.replace("\0", "")).collect(),
+            body: Self::byte_vec_to_string(body_content).replace("\0", "")
         })
     }
 
@@ -123,6 +120,22 @@ impl HttpMessage  {
         else {
             false
         }
+    }
 
+    fn vec_byte_array_to_string<const N: usize>(vec: Vec<[u8;N]>) -> Vec<String> {
+        let mut vec_string: Vec<String> = Vec::new();
+        for byte_array in vec {
+            vec_string.push(Self::byte_array_to_string(byte_array));
+        }
+
+        vec_string
+    }
+
+    fn byte_array_to_string<const N: usize>(array: [u8; N]) -> String {
+        String::from_utf8_lossy(&array).to_string()
+    }
+
+    fn byte_vec_to_string(vec: Vec<u8>) -> String {
+        String::from_utf8_lossy(&vec).to_string()
     }
 }
