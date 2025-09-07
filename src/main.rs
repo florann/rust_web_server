@@ -18,6 +18,8 @@ fn main() {
                             for header_field in &http_message.header_field {
                                 println!("{:?}",String::from_utf8_lossy(header_field));
                             }
+                            let string = String::from_utf8_lossy(&http_message.body).to_string();
+                            println!("{:?}", string);
                         },
                         Err(error) => {
                             println!("{}", error)
