@@ -1,5 +1,7 @@
 mod models;
 use std::{io::Read, net::{SocketAddr, TcpListener, UdpSocket}, thread, time::Duration};
+use windows_capture::{capture::GraphicsCaptureApiHandler, monitor::Monitor, settings::{ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings, MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings}};
+
 use crate::models::structs::http_message::HttpMessage;
 
 fn main() {
@@ -7,7 +9,7 @@ fn main() {
     let tcp_listener = TcpListener::bind("127.0.0.1:1235").unwrap();
     let udp_listener = UdpSocket::bind("127.0.0.1:1235").unwrap();
 
-    let handle_thread_tcp = thread::spawn(move ||{
+        let handle_thread_tcp = thread::spawn(move ||{
             println!("Tcp thread spawned");
             loop {
                 for stream in tcp_listener.incoming() {
@@ -76,4 +78,26 @@ fn main() {
 
         handle_thread_tcp.join().unwrap();
         handle_thread_udp.join().unwrap();
-}
+
+        let primary_monitor = Monitor::primary().expect("No primary monitor");
+        let settings = Settings::new(
+            // Item to capture
+            primary_monitor,
+            // Capture cursor settings
+            CursorCaptureSettings::Default,
+            // Draw border settings
+            DrawBorderSettings::Default,
+            // Secondary window settings, if you want to include secondary windows in the capture
+            SecondaryWindowSettings::Default,
+            // Minimum update interval, if you want to change the frame rate limit (default is 60 FPS or 16.67 ms)
+            MinimumUpdateIntervalSettings::Default,
+            // Dirty region settings,
+            DirtyRegionSettings::Default,
+            // The desired color format for the captured frame.
+            ColorFormat::Rgba8,
+            // Additional flags for the capture settings that will be passed to the user-defined `new` function.
+            "Yea this works".to_string(),
+        );
+        
+       // let graphics_capture_handler = GraphicsCaptureApiHandler::new();
+    }
