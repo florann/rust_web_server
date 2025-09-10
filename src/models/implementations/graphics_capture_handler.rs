@@ -1,16 +1,17 @@
-use std::intrinsics::fabsf128;
 use std::io::{self, Write};
 use std::os::raw;
 use std::sync::Arc;
 use std::time::Instant;
 use openh264::encoder::{self, Encoder};
-use openh264::formats::YUVSource;
+use openh264::formats::{RGBSource, RgbaSliceU8, YUVBuffer, YUVSource};
 use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
 use windows_capture::encoder::{
     AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder,
 };
 use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::InternalCaptureControl;
+use windows_capture::settings::ColorFormat;
+use crate::models::structs::rgba_pixel::RgbaPixel;
 use crate::models::structs::screen_capture::ScreenCapture;
 
 impl GraphicsCaptureApiHandler for ScreenCapture {
@@ -39,21 +40,32 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
     ) -> Result<(), Self::Error> {
         print!("\rRecording for: {} seconds", self.start.elapsed().as_secs());
         io::stdout().flush()?;
-
-        let raw_data = frame.buffer()?;
+        frame.color_format();
+        let mut frame_buffer = frame.buffer()?;
         if let Some(encoder) = &mut self.encoder {
 
             //let yuv_source: YUVSource = YUVSource 
             /*
-            TODO
-            Y = 0.299*R + 0.587*G + 0.114*B
-            U = -0.147*R - 0.289*G + 0.436*B + 128
-            V = 0.615*R - 0.515*G - 0.100*B + 128
+                TODO
+                Y = 0.299*R + 0.587*G + 0.114*B
+                U = -0.147*R - 0.289*G + 0.436*B + 128
+                V = 0.615*R - 0.515*G - 0.100*B + 128
 
-            Interleaved → Planar
-[RGBA,RGBA,RGBA...] → [YYY...][UUU...][VVV...]
+                Interleaved → Planar
+                [RGBA,RGBA,RGBA...] → [YYY...][UUU...][VVV...]
              */
-            encoder.encode(raw_data.as_raw_buffer());
+
+            let mut yuv_source: YUVBuffer = YUVBuffer::new(frame.width() as usize, frame.height() as usize);
+            let rgb_source: RgbaSliceU8 = RgbaSliceU8::new(frame_buffer.as_raw_buffer(), (frame.width() as usize, frame.height() as usize));
+
+            if frame.color_format() == ColorFormat::Rgba8 {
+                yuv_source.read_rgb(rgb_source);
+            }
+            else if frame.color_format() == ColorFormat::Rgba16F {
+
+            }
+
+            encoder.encode(&yuv_source);
         }
 
         // Send the frame to the video encoder
