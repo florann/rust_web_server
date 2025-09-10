@@ -41,6 +41,11 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
         print!("\rRecording for: {} seconds", self.start.elapsed().as_secs());
         io::stdout().flush()?;
         frame.color_format();
+
+        let color_format = frame.color_format();
+        let frame_width = frame.width() as usize;
+        let frame_height = frame.height() as usize;
+
         let mut frame_buffer = frame.buffer()?;
         if let Some(encoder) = &mut self.encoder {
 
@@ -55,13 +60,14 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
                 [RGBA,RGBA,RGBA...] → [YYY...][UUU...][VVV...]
              */
 
-            let mut yuv_source: YUVBuffer = YUVBuffer::new(frame.width() as usize, frame.height() as usize);
-            let rgb_source: RgbaSliceU8 = RgbaSliceU8::new(frame_buffer.as_raw_buffer(), (frame.width() as usize, frame.height() as usize));
 
-            if frame.color_format() == ColorFormat::Rgba8 {
+            let mut yuv_source: YUVBuffer = YUVBuffer::new(frame_width, frame_height);
+            let rgb_source: RgbaSliceU8 = RgbaSliceU8::new(frame_buffer.as_raw_buffer(), (frame_width, frame_height));
+
+            if color_format == ColorFormat::Rgba8 {
                 yuv_source.read_rgb(rgb_source);
             }
-            else if frame.color_format() == ColorFormat::Rgba16F {
+            else if color_format == ColorFormat::Rgba16F {
 
             }
 
