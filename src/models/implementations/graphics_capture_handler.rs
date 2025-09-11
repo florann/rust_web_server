@@ -13,6 +13,7 @@ use windows_capture::graphics_capture_api::InternalCaptureControl;
 use windows_capture::settings::ColorFormat;
 use crate::models::structs::rgba_pixel::RgbaPixel;
 use crate::models::structs::screen_capture::ScreenCapture;
+use crate::FRAME_SENDER;
 
 impl GraphicsCaptureApiHandler for ScreenCapture {
     // The type of flags used to get the values from the settings.
@@ -27,9 +28,12 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
         println!("Created with Flags: {}", ctx.flags);
 
-        let encoder = Encoder::new().unwrap();
-
-        Ok(Self { encoder: Some(encoder), start: Instant::now() })
+        Ok(Self {
+            encoder: Some(Encoder::new().unwrap()),
+            start: Instant::now(),
+            bit_frame_encoded: Vec::new(),
+            frame_sender: None, // ✅ Start with None (no sender)
+        })
     }
 
     // Called every time a new frame is available.
@@ -47,7 +51,7 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
         let frame_height = frame.height() as usize;
 
         let mut frame_buffer = frame.buffer()?;
-        if let Some(encoder) = &mut self.encoder {
+        let encoded_data = if let Some(encoder) = &mut self.encoder {
 
             //let yuv_source: YUVSource = YUVSource 
             /*
@@ -71,27 +75,28 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
 
             }
 
-            encoder.encode(&yuv_source);
+            let result_encoded_bit_stream = encoder.encode(&yuv_source);
+            match result_encoded_bit_stream {
+                Ok(encoded_bit_stream) => {
+                    Some(encoded_bit_stream.to_vec())
+                },
+                Err(error) => {
+                    eprintln!("Encoding error: {}", error);
+                    None
+                }
+            }
         }
+        else {
+            None
+        };
 
-        // Send the frame to the video encoder
-        //self.encoder.as_mut().unwrap().send_frame(frame)?;
-
-        // Note: The frame has other uses too, for example, you can save a single frame
-        // to a file, like this: frame.save_as_image("frame.png", ImageFormat::Png)?;
-        // Or get the raw data like this so you have full
-        // control: let data = frame.buffer()?;
-
-        // Stop the capture after 6 seconds
-        // if self.start.elapsed().as_secs() >= 6 {
-        //     // Finish the encoder and save the video.
-        //     self.encoder.take().unwrap().finish()?;
-
-        //     capture_control.stop();
-
-        //     // Because the previous prints did not include a newline.
-        //     println!();
-        // }
+        if let Some(data) = encoded_data {
+           if let Some(sender_mutex) = FRAME_SENDER.get() {
+            if let Ok(sender) = sender_mutex.lock() {
+                let _ = sender.send(data);
+            }
+        }
+        }
 
         Ok(())
     }

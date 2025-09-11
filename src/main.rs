@@ -1,8 +1,11 @@
 mod models;
-use std::{io::Read, net::{SocketAddr, TcpListener, UdpSocket}, thread, time::Duration};
+use std::{io::Read, net::{SocketAddr, TcpListener, UdpSocket}, sync::{Mutex, OnceLock}, thread, time::Duration};
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use windows_capture::{capture::GraphicsCaptureApiHandler, monitor::Monitor, settings::{ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings, MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings}};
 
-use crate::models::structs::http_message::HttpMessage;
+use crate::models::structs::{http_message::HttpMessage, screen_capture::ScreenCapture};
+
+static FRAME_SENDER: OnceLock<Mutex<mpsc::Sender<Vec<u8>>>> = OnceLock::new();
 
 fn main() {
 
@@ -43,7 +46,32 @@ fn main() {
         socket.set_nonblocking(true).unwrap();
         let mut buf = [0u8; 2];
         let mut clients: Vec<SocketAddr> = Vec::new();
+        let (sender, receiver) = mpsc::channel::<Vec<u8>>();
 
+        
+        let primary_monitor = Monitor::primary().expect("No primary monitor");
+        let settings = Settings::new(
+            // Item to capture
+            primary_monitor,
+            // Capture cursor settings
+            CursorCaptureSettings::Default,
+            // Draw border settings
+            DrawBorderSettings::Default,
+            // Secondary window settings, if you want to include secondary windows in the capture
+            SecondaryWindowSettings::Default,
+            // Minimum update interval, if you want to change the frame rate limit (default is 60 FPS or 16.67 ms)
+            MinimumUpdateIntervalSettings::Default,
+            // Dirty region settings,
+            DirtyRegionSettings::Default,
+            // The desired color format for the captured frame.
+            ColorFormat::Rgba8,
+            // Additional flags for the capture settings that will be passed to the user-defined `new` function.
+            "Yea this works".to_string(),
+        );
+
+        FRAME_SENDER.set(Mutex::new(sender)).unwrap();
+        let _ = ScreenCapture::start(settings);
+        
         let handle_thread_udp = thread::spawn(move ||{
             println!("Udp thread spawned");
             loop {
@@ -66,11 +94,22 @@ fn main() {
                     }
                 }
 
-                for client in &clients {
-                    let dummy: [u8; 5] = *b"dummy";
-                    println!("Sending dummy");
-                    socket.send_to(&dummy, client);
+                match receiver.try_recv() {
+                    Ok(frame) => {
+                        for client in &clients {
+                            println!("Sending dummy");
+                            socket.send_to(&frame, client);
+                        }
+                    }, 
+                    Err(mpsc::TryRecvError::Empty) => {
+                        println!("received empty");
+                    },
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        println!("disconnected");
+                        break;
+                    }
                 }
+
 
                 thread::sleep(Duration::from_millis(33));
             }
@@ -79,25 +118,6 @@ fn main() {
         handle_thread_tcp.join().unwrap();
         handle_thread_udp.join().unwrap();
 
-        let primary_monitor = Monitor::primary().expect("No primary monitor");
-        let settings = Settings::new(
-            // Item to capture
-            primary_monitor,
-            // Capture cursor settings
-            CursorCaptureSettings::Default,
-            // Draw border settings
-            DrawBorderSettings::Default,
-            // Secondary window settings, if you want to include secondary windows in the capture
-            SecondaryWindowSettings::Default,
-            // Minimum update interval, if you want to change the frame rate limit (default is 60 FPS or 16.67 ms)
-            MinimumUpdateIntervalSettings::Default,
-            // Dirty region settings,
-            DirtyRegionSettings::Default,
-            // The desired color format for the captured frame.
-            ColorFormat::Rgba8,
-            // Additional flags for the capture settings that will be passed to the user-defined `new` function.
-            "Yea this works".to_string(),
-        );
         
        // let graphics_capture_handler = GraphicsCaptureApiHandler::new();
     }
