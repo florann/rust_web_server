@@ -70,7 +70,6 @@ fn main() {
         );
 
         FRAME_SENDER.set(Mutex::new(sender)).unwrap();
-        let _ = ScreenCapture::start(settings);
         
         let handle_thread_udp = thread::spawn(move ||{
             println!("Udp thread spawned");
@@ -115,8 +114,13 @@ fn main() {
             }
         });
 
+        let handle_thread_screen_capture = thread::spawn(move ||{
+            let _ = ScreenCapture::start(settings);
+        });
+
         handle_thread_tcp.join().unwrap();
         handle_thread_udp.join().unwrap();
+        handle_thread_screen_capture.join().unwrap();
 
         
        // let graphics_capture_handler = GraphicsCaptureApiHandler::new();
