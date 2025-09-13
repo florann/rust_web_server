@@ -1,3 +1,11 @@
+#[macro_export]
+macro_rules! debug_println {
+    ($($arg:tt)*) => {
+        #[cfg(feature = "debug_output")]
+        debug_println!($($arg)*);
+    };
+}
+
 mod models;
 use std::{io::Read, net::{SocketAddr, TcpListener, UdpSocket}, sync::{Mutex, OnceLock}, thread, time::Duration};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
@@ -15,7 +23,7 @@ fn main() {
     let udp_listener = UdpSocket::bind("127.0.0.1:1235").unwrap();
 
         let handle_thread_tcp = thread::spawn(move ||{
-            println!("Tcp thread spawned");
+            debug_println!("Tcp thread spawned");
             loop {
                 for stream in tcp_listener.incoming() {
                     match stream {
@@ -24,15 +32,15 @@ fn main() {
                             let http_message = HttpMessage::new(stream);
                             match http_message {
                                 Ok(http_message) => {
-                                    println!("{:?}", &http_message.start_line);
+                                    debug_println!("{:?}", &http_message.start_line);
                                     for header_field in &http_message.header_field {
-                                        println!("{:?}", header_field);
+                                        debug_println!("{:?}", header_field);
                                     }
                                     let string = http_message.body;
-                                    println!("{:?}", string);
+                                    debug_println!("{:?}", string);
                                 },
                                 Err(error) => {
-                                    println!("{}", error)
+                                    debug_println!("{}", error)
                                 }
                             }
                         },
@@ -77,7 +85,7 @@ fn main() {
         );
 
         let handle_thread_udp = thread::spawn(move ||{
-            println!("Udp thread spawned");
+            debug_println!("Udp thread spawned");
             loop {
  
                 match socket.recv_from(&mut buf) {
@@ -113,10 +121,10 @@ fn main() {
                         }
                     }, 
                     Err(mpsc::TryRecvError::Empty) => {
-                        //println!("received empty");
+                        //debug_println!("received empty");
                     },
                     Err(mpsc::TryRecvError::Disconnected) => {
-                        println!("disconnected");
+                        debug_println!("disconnected");
                         break;
                     }
                 }

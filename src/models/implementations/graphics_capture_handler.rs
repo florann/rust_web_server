@@ -27,7 +27,7 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
     // Function that will be called to create a new instance. The flags can be
     // passed from settings.
     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
-        println!("Created with Flags: {}", ctx.flags);
+        debug_println!("Created with Flags: {}", ctx.flags);
 
         Ok(Self {
             encoder: Some(Encoder::new().unwrap()),
@@ -57,8 +57,8 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
                             *encoder = Encoder::new().unwrap();
                                 self.frame_counter = 0;
     
-                                println!("");
-                                println!("Encoder recreation");
+                                debug_println!("");
+                                debug_println!("Encoder recreation");
                          }
                     } 
                 }
@@ -94,7 +94,7 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
                     Some(encoded_bit_stream.to_vec())
                 },
                 Err(error) => {
-                    eprintln!("Encoding error: {}", error);
+                    debug_println!("Encoding error: {}", error);
                     None
                 }
             }
@@ -108,7 +108,7 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
 
                 // First check if data is empty
                 if data.is_empty() {
-                    println!("Empty data received from encoder");
+                    debug_println!("Empty data received from encoder");
                     self.frame_counter += 1;
                     return Ok(());
                 }
@@ -123,7 +123,7 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
                             
                             if start + 4 < pos && start + 4 < data.len() {
                                 let nal_type = data[start + 4] & 0x1F;
-                                println!("NAL Type: {} - Size: {} bytes", nal_type, nal_data.len());
+                                debug_println!("NAL Type: {} - Size: {} bytes", nal_type, nal_data.len());
                                 
                                 if let Ok(sender) = sender_mutex.lock() {
                                     let _ = sender.send(nal_data);
@@ -141,13 +141,13 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
                         let nal_data = data[start..].to_vec();
                         if start + 4 < data.len() && !nal_data.is_empty() {
                             let nal_type = data[start + 4] & 0x1F;
-                            println!("NAL Type: {} - Size: {} bytes", nal_type, nal_data.len());
+                            debug_println!("NAL Type: {} - Size: {} bytes", nal_type, nal_data.len());
                             
                             if let Ok(sender) = sender_mutex.lock() {
                                 let _ = sender.send(nal_data);
                             }
                         } else if !nal_data.is_empty() {
-                            println!("Sending NAL unit without type info - Size: {} bytes", nal_data.len());
+                            debug_println!("Sending NAL unit without type info - Size: {} bytes", nal_data.len());
                             if let Ok(sender) = sender_mutex.lock() {
                                 let _ = sender.send(nal_data);
                             }
@@ -162,7 +162,7 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
 
     // Optional handler called when the capture item (usually a window) is closed.
     fn on_closed(&mut self) -> Result<(), Self::Error> {
-        println!("Capture session ended");
+        debug_println!("Capture session ended");
 
         Ok(())
     }
