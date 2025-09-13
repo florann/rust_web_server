@@ -6,6 +6,8 @@ use windows_capture::{capture::GraphicsCaptureApiHandler, monitor::Monitor, sett
 use crate::models::structs::{http_message::HttpMessage, screen_capture::ScreenCapture};
 
 static FRAME_SENDER: OnceLock<Mutex<mpsc::Sender<Vec<u8>>>> = OnceLock::new();
+static CLIENT_NUMBER_SENDER: OnceLock<Mutex<mpsc::Sender<usize>>> = OnceLock::new();
+static CLIENT_NUMBER_RECEIVER: OnceLock<Mutex<mpsc::Receiver<usize>>> = OnceLock::new();
 
 fn main() {
 
@@ -46,9 +48,14 @@ fn main() {
         socket.set_nonblocking(true).unwrap();
         let mut buf = [0u8; 2];
         let mut clients: Vec<SocketAddr> = Vec::new();
-        let (sender, receiver) = mpsc::channel::<Vec<u8>>();
 
+        let (sender, receiver) = mpsc::channel::<Vec<u8>>();
+        FRAME_SENDER.set(Mutex::new(sender)).unwrap();
         
+        let (client_number_sender, client_number_receiver) = mpsc::channel::<usize>();
+        CLIENT_NUMBER_SENDER.set(Mutex::new(client_number_sender)).unwrap();
+        CLIENT_NUMBER_RECEIVER.set(Mutex::new(client_number_receiver)).unwrap();
+
         let primary_monitor = Monitor::primary().expect("No primary monitor");
         let settings = Settings::new(
             // Item to capture
@@ -69,8 +76,6 @@ fn main() {
             "".to_string(),
         );
 
-        FRAME_SENDER.set(Mutex::new(sender)).unwrap();
-        
         let handle_thread_udp = thread::spawn(move ||{
             println!("Udp thread spawned");
             loop {
@@ -79,10 +84,20 @@ fn main() {
                     Ok((nbytes, client_addr)) => {
                         if nbytes == 1 {
                             clients.push(client_addr);
+                            if let Some(client_number_mutex) = CLIENT_NUMBER_SENDER.get() {     
+                                if let Ok(client_number) = client_number_mutex.lock() {
+                                    let _ = client_number.send(clients.len());
+                                }
+                            }
                         }
                         else if nbytes == 2 {
                             if let Some(client_position) = clients.iter().position(|client_stored| client_stored == &client_addr){
                                 clients.remove(client_position);
+                                if let Some(client_number_mutex) = CLIENT_NUMBER_SENDER.get() {     
+                                    if let Ok(client_number) = client_number_mutex.lock() {
+                                        let _ = client_number.send(clients.len());
+                                    }
+                                }
                             }
                         }
                     },

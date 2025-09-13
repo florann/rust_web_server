@@ -14,6 +14,7 @@ use windows_capture::settings::ColorFormat;
 use crate::models::structs::rgba_pixel::RgbaPixel;
 use crate::models::structs::screen_capture::ScreenCapture;
 use crate::FRAME_SENDER;
+use crate::CLIENT_NUMBER_RECEIVER;
 
 impl GraphicsCaptureApiHandler for ScreenCapture {
     // The type of flags used to get the values from the settings.
@@ -30,10 +31,8 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
 
         Ok(Self {
             encoder: Some(Encoder::new().unwrap()),
-            start: Instant::now(),
-            bit_frame_encoded: Vec::new(),
-            frame_sender: None,
-            frame_counter: 0
+            frame_counter: 0,
+            client_number: 0
         })
     }
 
@@ -50,16 +49,21 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
         let frame_width = frame.width() as usize;
         let frame_height = frame.height() as usize;
         
-        if let Some(encoder) = &mut self.encoder {
-            if self.frame_counter == 60 {
-                    *encoder = Encoder::new().unwrap();
-                    self.frame_counter = 0;
-
-                    println!("");
-                    println!("Encoder recreation");
+        if let Some(client_number_mutex) = CLIENT_NUMBER_RECEIVER.get() {
+            if let Ok(client_number_receiver) = client_number_mutex.lock() {
+                if let Ok(client_number) = client_number_receiver.try_recv() {
+                    if client_number > self.client_number {
+                         if let Some(encoder) = &mut self.encoder {
+                            *encoder = Encoder::new().unwrap();
+                                self.frame_counter = 0;
+    
+                                println!("");
+                                println!("Encoder recreation");
+                         }
+                    } 
+                }
             }
         }
-
 
         let mut frame_buffer = frame.buffer()?;
         let encoded_data = if let Some(encoder) = &mut self.encoder {
