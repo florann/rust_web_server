@@ -8,16 +8,11 @@ use crate::models::structs::screen_capture::ScreenCapture;
 use crate::models::structs::rgba_pixel::RgbaPixel;
 
 impl ScreenCapture {
-    pub fn set_frame_sender(&mut self, frame_sender: Sender<Vec<u8>>){
-        self.frame_sender = Some(frame_sender);
-    }
-
-    pub fn set_encoded_frame(&mut self, data: Vec<u8>) {
-        self.bit_frame_encoded = data;
-    }
-
-    pub fn stop_capture(&self, capture_control: InternalCaptureControl) {
-        capture_control.stop();
+    pub fn is_start_code(data: &[u8]) -> bool {
+        if *data == [0x00,0x00,0x00,0x01] {
+            return true;
+        }
+        false
     }
 
     pub fn get_rgba_from_frame_buffer(frame_buffer: &mut FrameBuffer) -> Result<Vec<RgbaPixel>, String> {

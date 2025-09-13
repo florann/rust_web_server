@@ -32,7 +32,8 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
             encoder: Some(Encoder::new().unwrap()),
             start: Instant::now(),
             bit_frame_encoded: Vec::new(),
-            frame_sender: None, // ✅ Start with None (no sender)
+            frame_sender: None,
+            frame_counter: 0
         })
     }
 
@@ -42,13 +43,23 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
         frame: &mut Frame,
         capture_control: InternalCaptureControl,
     ) -> Result<(), Self::Error> {
-        print!("\rRecording for: {} seconds", self.start.elapsed().as_secs());
         io::stdout().flush()?;
         frame.color_format();
 
         let color_format = frame.color_format();
         let frame_width = frame.width() as usize;
         let frame_height = frame.height() as usize;
+        
+        if let Some(encoder) = &mut self.encoder {
+            if self.frame_counter == 60 {
+                    *encoder = Encoder::new().unwrap();
+                    self.frame_counter = 0;
+
+                    println!("");
+                    println!("Encoder recreation");
+            }
+        }
+
 
         let mut frame_buffer = frame.buffer()?;
         let encoded_data = if let Some(encoder) = &mut self.encoder {
@@ -64,7 +75,6 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
                 [RGBA,RGBA,RGBA...] → [YYY...][UUU...][VVV...]
              */
 
-
             let mut yuv_source: YUVBuffer = YUVBuffer::new(frame_width, frame_height);
             let rgb_source: RgbaSliceU8 = RgbaSliceU8::new(frame_buffer.as_raw_buffer(), (frame_width, frame_height));
 
@@ -72,11 +82,10 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
                 yuv_source.read_rgb(rgb_source);
             }
             else if color_format == ColorFormat::Rgba16F {
-
+                return Ok(());
             }
 
-            let result_encoded_bit_stream = encoder.encode(&yuv_source);
-            match result_encoded_bit_stream {
+            match encoder.encode(&yuv_source) {
                 Ok(encoded_bit_stream) => {
                     Some(encoded_bit_stream.to_vec())
                 },
@@ -91,13 +100,59 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
         };
 
         if let Some(data) = encoded_data {
-           if let Some(sender_mutex) = FRAME_SENDER.get() {
-            if let Ok(sender) = sender_mutex.lock() {
-                let _ = sender.send(data);
+            if let Some(sender_mutex) = FRAME_SENDER.get() {                
+
+                // First check if data is empty
+                if data.is_empty() {
+                    println!("Empty data received from encoder");
+                    self.frame_counter += 1;
+                    return Ok(());
+                }
+
+                let mut pos: usize = 0;
+                let mut nal_start: Option<usize> = None;
+
+                while pos <= data.len().saturating_sub(4) {
+                    if Self::is_start_code(&data[pos..pos+4]) {
+                        if let Some(start) = nal_start {
+                            let nal_data = data[start..pos].to_vec();
+                            
+                            if start + 4 < pos && start + 4 < data.len() {
+                                let nal_type = data[start + 4] & 0x1F;
+                                println!("NAL Type: {} - Size: {} bytes", nal_type, nal_data.len());
+                                
+                                if let Ok(sender) = sender_mutex.lock() {
+                                    let _ = sender.send(nal_data);
+                                }
+                            }
+                        }
+                        
+                        nal_start = Some(pos);
+                    }
+                    pos += 1;
+                }
+
+                if let Some(start) = nal_start {
+                    if start < data.len() {
+                        let nal_data = data[start..].to_vec();
+                        if start + 4 < data.len() && !nal_data.is_empty() {
+                            let nal_type = data[start + 4] & 0x1F;
+                            println!("NAL Type: {} - Size: {} bytes", nal_type, nal_data.len());
+                            
+                            if let Ok(sender) = sender_mutex.lock() {
+                                let _ = sender.send(nal_data);
+                            }
+                        } else if !nal_data.is_empty() {
+                            println!("Sending NAL unit without type info - Size: {} bytes", nal_data.len());
+                            if let Ok(sender) = sender_mutex.lock() {
+                                let _ = sender.send(nal_data);
+                            }
+                        }
+                    }
+                }
             }
         }
-        }
-
+        self.frame_counter = self.frame_counter + 1;
         Ok(())
     }
 

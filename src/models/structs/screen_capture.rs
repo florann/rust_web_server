@@ -9,5 +9,6 @@ pub struct ScreenCapture {
 
     pub bit_frame_encoded: Vec<u8>,
 
-    pub frame_sender: Option<Sender<Vec<u8>>>
+    pub frame_sender: Option<Sender<Vec<u8>>>,
+    pub frame_counter: u16
 }

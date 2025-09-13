@@ -66,7 +66,7 @@ fn main() {
             // The desired color format for the captured frame.
             ColorFormat::Rgba8,
             // Additional flags for the capture settings that will be passed to the user-defined `new` function.
-            "Yea this works".to_string(),
+            "".to_string(),
         );
 
         FRAME_SENDER.set(Mutex::new(sender)).unwrap();
@@ -77,8 +77,6 @@ fn main() {
  
                 match socket.recv_from(&mut buf) {
                     Ok((nbytes, client_addr)) => {
-                        println!("Something received");
-                        println!("Nbbytes {}", nbytes);
                         if nbytes == 1 {
                             clients.push(client_addr);
                         }
@@ -96,12 +94,11 @@ fn main() {
                 match receiver.try_recv() {
                     Ok(frame) => {
                         for client in &clients {
-                            println!("Sending dummy");
                             socket.send_to(&frame, client);
                         }
                     }, 
                     Err(mpsc::TryRecvError::Empty) => {
-                        println!("received empty");
+                        //println!("received empty");
                     },
                     Err(mpsc::TryRecvError::Disconnected) => {
                         println!("disconnected");
