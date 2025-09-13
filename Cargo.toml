@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+windows-capture = "1.5.0"
+openh264 = "0.8.1"
+
+[features]
+debug_output = []
