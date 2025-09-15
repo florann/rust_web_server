@@ -2,7 +2,7 @@
 macro_rules! debug_println {
     ($($arg:tt)*) => {
         #[cfg(feature = "debug_output")]
-        debug_println!($($arg)*);
+        println!($($arg)*);
     };
 }
 

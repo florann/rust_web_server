@@ -1,0 +1,9 @@
+[package]
+name = "test_client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+openh264 = "0.8.1"
+winit = "0.30.12"
+pixels = "0.15.0"
