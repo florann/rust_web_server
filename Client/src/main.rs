@@ -1,9 +1,40 @@
-use std::{net::UdpSocket, sync::mpsc, thread, time::Duration};
+use std::{fs::OpenOptions, net::UdpSocket, sync::mpsc, thread, time::Duration};
+use std::io::Write; 
+
 use winit::{
     application::ApplicationHandler, event::WindowEvent, event_loop::{ActiveEventLoop, EventLoop}, window::{Window, WindowId}
 };
 use openh264::{decoder::Decoder, encoder::{self, Encoder}};
 use pixels::{Pixels, SurfaceTexture};
+
+
+fn log_to_file(message: &str) {
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)  // Append instead of overwrite
+        .open("./log/debug.log")
+        .unwrap();
+    
+    writeln!(file, "{}", message).unwrap();
+}
+
+fn log_to_file_vec(message: &Vec<u8>) {
+    let message_clone = message.clone();
+    let handle = thread::spawn(move|| {
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)  // Append instead of overwrite
+            .open("./log/debug.log")
+            .unwrap();
+        
+        println!("Log in file");
+        writeln!(file, "{:?}", message_clone).unwrap();
+        writeln!(file, "---").unwrap(); // Separator line
+        file.flush().unwrap(); // Force write to disk
+    });
+
+    //handle.join().unwrap(); // Wait for thread to finish
+}
 
 
 struct App <'a>{
@@ -101,6 +132,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     println!("Found H.264 start code");
                                     let nal_type = buffer[4] & 0x1F;
                                     println!("NAL type: {}", nal_type);
+                                    log_to_file_vec(&buffer.to_vec());
+                                   // break;
+                                   
                                 } else {
                                     println!("No H.264 start code found");
                                 }
