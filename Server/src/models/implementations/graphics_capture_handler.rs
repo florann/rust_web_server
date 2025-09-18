@@ -31,7 +31,6 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
 
         Ok(Self {
             encoder: Some(Encoder::new().unwrap()),
-            frame_counter: 0,
             client_number: 0
         })
     }
@@ -55,7 +54,6 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
                     if client_number > self.client_number {
                          if let Some(encoder) = &mut self.encoder {
                             *encoder = Encoder::new().unwrap();
-                                self.frame_counter = 0;
     
                                 println!("");
                                 println!("Encoder recreation");
@@ -67,17 +65,6 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
 
         let mut frame_buffer = frame.buffer()?;
         let encoded_data = if let Some(encoder) = &mut self.encoder {
-
-            //let yuv_source: YUVSource = YUVSource 
-            /*
-                TODO
-                Y = 0.299*R + 0.587*G + 0.114*B
-                U = -0.147*R - 0.289*G + 0.436*B + 128
-                V = 0.615*R - 0.515*G - 0.100*B + 128
-
-                Interleaved → Planar
-                [RGBA,RGBA,RGBA...] → [YYY...][UUU...][VVV...]
-             */
 
             let mut yuv_source: YUVBuffer = YUVBuffer::new(frame_width, frame_height);
             let rgb_source: RgbaSliceU8 = RgbaSliceU8::new(frame_buffer.as_raw_buffer(), (frame_width, frame_height));
@@ -109,7 +96,6 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
                 // First check if data is empty
                 if data.is_empty() {
                     println!("Empty data received from encoder");
-                    self.frame_counter += 1;
                     return Ok(());
                 }
 
@@ -156,7 +142,7 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
                 }
             }
         }
-        self.frame_counter = self.frame_counter + 1;
+
         Ok(())
     }
 

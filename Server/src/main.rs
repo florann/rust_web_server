@@ -131,8 +131,6 @@ fn main() {
         let socket = UdpSocket::bind("0.0.0.0:8080").unwrap();
         socket.set_nonblocking(true).unwrap();
        
-        let mut clients: Vec<SocketAddr> = Vec::new();
-
         let (sender, receiver) = mpsc::channel::<Vec<u8>>();
         FRAME_SENDER.set(Mutex::new(sender)).unwrap();
         
@@ -160,55 +158,7 @@ fn main() {
             "".to_string(),
         );
 
-        let handle_thread_udp = thread::spawn(move ||{
-            println!("Udp thread spawned");
-            loop {
- 
-                match socket.recv_from(&mut buf) {
-                    Ok((nbytes, client_addr)) => {
-                        if nbytes == 1 {
-                            clients.push(client_addr);
-                            if let Some(client_number_mutex) = CLIENT_NUMBER_SENDER.get() {     
-                                if let Ok(client_number) = client_number_mutex.lock() {
-                                    let _ = client_number.send(clients.len());
-                                }
-                            }
-                        }
-                        else if nbytes == 2 {
-                            if let Some(client_position) = clients.iter().position(|client_stored| client_stored == &client_addr){
-                                clients.remove(client_position);
-                                if let Some(client_number_mutex) = CLIENT_NUMBER_SENDER.get() {     
-                                    if let Ok(client_number) = client_number_mutex.lock() {
-                                        let _ = client_number.send(clients.len());
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    Err(_) => {
-
-                    }
-                }
-
-                match receiver.try_recv() {
-                    Ok(frame) => {
-                        for client in &clients {
-                            socket.send_to(&frame, client);
-                        }
-                    }, 
-                    Err(mpsc::TryRecvError::Empty) => {
-                        //println!("received empty");
-                    },
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        println!("disconnected");
-                        break;
-                    }
-                }
-
-
-                thread::sleep(Duration::from_millis(33));
-            }
-        });
+        let handle_thread_udp = new_emit_thread(arcswap_clients, socket);
 
         let handle_thread_screen_capture = thread::spawn(move ||{
             let _ = ScreenCapture::start(settings);
