@@ -13,8 +13,8 @@ use windows_capture::graphics_capture_api::InternalCaptureControl;
 use windows_capture::settings::ColorFormat;
 use crate::models::structs::rgba_pixel::RgbaPixel;
 use crate::models::structs::screen_capture::ScreenCapture;
-use crate::FRAME_SENDER;
 use crate::CLIENT_NUMBER_RECEIVER;
+use crate::GLOBAL_QUEUE;
 
 impl GraphicsCaptureApiHandler for ScreenCapture {
     // The type of flags used to get the values from the settings.
@@ -91,53 +91,45 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
         };
 
         if let Some(data) = encoded_data {
-            if let Some(sender_mutex) = FRAME_SENDER.get() {                
+            // First check if data is empty
+            if data.is_empty() {
+                println!("Empty data received from encoder");
+                return Ok(());
+            }
 
-                // First check if data is empty
-                if data.is_empty() {
-                    println!("Empty data received from encoder");
-                    return Ok(());
-                }
+            let mut pos: usize = 0;
+            let mut nal_start: Option<usize> = None;
 
-                let mut pos: usize = 0;
-                let mut nal_start: Option<usize> = None;
-
-                while pos <= data.len().saturating_sub(4) {
-                    if Self::is_start_code(&data[pos..pos+4]) {
-                        if let Some(start) = nal_start {
-                            let nal_data = data[start..pos].to_vec();
-                            
-                            if start + 4 < pos && start + 4 < data.len() {
-                                let nal_type = data[start + 4] & 0x1F;
-                                println!("NAL Type: {} - Size: {} bytes", nal_type, nal_data.len());
-                                
-                                if let Ok(sender) = sender_mutex.lock() {
-                                    let _ = sender.send(nal_data);
-                                }
-                            }
-                        }
+            while pos <= data.len().saturating_sub(4) {
+                if Self::is_start_code(&data[pos..pos+4]) {
+                    if let Some(start) = nal_start {
+                        let nal_data = data[start..pos].to_vec();
                         
-                        nal_start = Some(pos);
-                    }
-                    pos += 1;
-                }
-
-                if let Some(start) = nal_start {
-                    if start < data.len() {
-                        let nal_data = data[start..].to_vec();
-                        if start + 4 < data.len() && !nal_data.is_empty() {
+                        if start + 4 < pos && start + 4 < data.len() {
                             let nal_type = data[start + 4] & 0x1F;
                             println!("NAL Type: {} - Size: {} bytes", nal_type, nal_data.len());
                             
-                            if let Ok(sender) = sender_mutex.lock() {
-                                let _ = sender.send(nal_data);
-                            }
-                        } else if !nal_data.is_empty() {
-                            println!("Sending NAL unit without type info - Size: {} bytes", nal_data.len());
-                            if let Ok(sender) = sender_mutex.lock() {
-                                let _ = sender.send(nal_data);
-                            }
+                            GLOBAL_QUEUE.lock().unwrap().push_back(nal_data);
                         }
+                    }
+                    
+                    nal_start = Some(pos);
+                }
+                pos += 1;
+            }
+
+            if let Some(start) = nal_start {
+                if start < data.len() {
+                    let nal_data = data[start..].to_vec();
+                    if start + 4 < data.len() && !nal_data.is_empty() {
+                        let nal_type = data[start + 4] & 0x1F;
+                        println!("NAL Type: {} - Size: {} bytes", nal_type, nal_data.len());
+                        // Send to buffer
+                        GLOBAL_QUEUE.lock().unwrap().push_back(nal_data);
+                    } else if !nal_data.is_empty() {
+                        println!("Sending NAL unit without type info - Size: {} bytes", nal_data.len());
+                        // Send to buffer
+                        GLOBAL_QUEUE.lock().unwrap().push_back(nal_data);
                     }
                 }
             }

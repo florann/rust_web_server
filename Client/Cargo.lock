@@ -1527,6 +1527,7 @@ dependencies = [
 name = "test_client"
 version = "0.1.0"
 dependencies = [
+ "once_cell",
  "openh264",
  "pixels",
  "winit",

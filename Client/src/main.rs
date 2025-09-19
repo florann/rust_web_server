@@ -1,12 +1,20 @@
+use std::collections::VecDeque;
+use std::process::exit;
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 use std::{fs::OpenOptions, net::UdpSocket, sync::mpsc, thread, time::Duration};
 use std::io::Write; 
 
+use once_cell::sync::Lazy;
 use winit::{
     application::ApplicationHandler, event::WindowEvent, event_loop::{ActiveEventLoop, EventLoop}, window::{Window, WindowId}
 };
-use openh264::{decoder::Decoder, encoder::{self, Encoder}};
+use openh264::{decoder::Decoder};
 use pixels::{Pixels, SurfaceTexture};
 
+static GLOBAL_QUEUE: Lazy<Arc<Mutex<VecDeque<Vec<u8>>>>> = 
+    Lazy::new(|| Arc::new(Mutex::new(VecDeque::new())));
 
 fn log_to_file(message: &str) {
     let mut file = OpenOptions::new()
@@ -35,7 +43,6 @@ fn log_to_file_vec(message: &Vec<u8>) {
 
     //handle.join().unwrap(); // Wait for thread to finish
 }
-
 
 struct App <'a>{
       pixels: Option<Pixels<'a>>,
@@ -75,23 +82,61 @@ impl<'a>  ApplicationHandler for App<'a> {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (frame_sender, frame_receiver) = mpsc::channel::<Vec<u8>>();
+    let shared_sender = Arc::new(Mutex::new(frame_sender));
 
-    let udp_thread = thread::spawn(move ||{
-        let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
-        
-        // Subscribe (send 1 byte)
-        socket.send_to(&[1], "127.0.0.1:8080").unwrap();
-        println!("Subscribed! Waiting for messages...\n");
-        
-        let mut buffer = [0u8; 1024 * 1024];
-        let mut decoder =   Decoder::new().unwrap();
-        let mut message_count = 0;
+    // Run GUI (blocks until window closes)
+    let event_loop = EventLoop::new()?;
+    let mut app = App { 
+        pixels: None,
+        frame_receiver: Some(frame_receiver),
+    };
 
-        //let mut frame_buffer = Vec::new();
+    let frame_sender_clone = shared_sender.clone();
+    let handler_display = new_display_stream_thread(frame_sender_clone);
 
+     
+    let handler_receive = new_receive_thread();
+    let handler_receive2 = new_receive_thread();
+    
+    handler_display.join().unwrap();
+    handler_receive.join().unwrap();
+    handler_receive2.join().unwrap();
+
+    event_loop.run_app(&mut app)?;
+    
+    Ok(())
+}
+
+fn new_display_stream_thread(frame_sender: Arc<Mutex<Sender<Vec<u8>>>>) -> JoinHandle<()> {
+    let handler = thread::spawn(move ||{
+        loop {
+            let item = {
+                let mut q = GLOBAL_QUEUE.lock().unwrap();
+                q.pop_front()
+            };
+    
+            if let Some(data) = item {
+                if frame_sender.lock().unwrap().send(data).is_err() {
+                    println!("Wola c'est l'erreur du 69");
+                    exit(1); 
+                }
+            }
+        }
+    });
+    handler
+}
+
+fn new_receive_thread() -> JoinHandle<()> {
+    let mut buffer = [0u8; 1024 * 1024];
+    let mut message_count = 0;
+    let mut decoder =   Decoder::new().unwrap();
+    let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
+
+    let thread_socket = socket.try_clone().unwrap();
+    let handler = thread::spawn(move ||{
         loop {
             thread::sleep(Duration::from_millis(33));
-            match socket.recv(&mut buffer) {
+            match thread_socket.recv(&mut buffer) {
                 Ok(bytes_received) => {
                     if bytes_received == 0 {
                         continue;
@@ -112,11 +157,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let mut rgba_buffer = vec![0u8; height * width * 4 *2 *2];
 
                             yuv_data.write_rgba8(&mut rgba_buffer);
-                            if frame_sender.send(rgba_buffer).is_err() {
-                                println!("Wola c'est l'erreur du 69");
-                                break; // GUI closed, exit thread 
-                            }
-
+                            GLOBAL_QUEUE.lock().unwrap().push_back(rgba_buffer);
                         },
                         Ok(None) => {
                             println!("Frame noot decoded");
@@ -133,8 +174,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     let nal_type = buffer[4] & 0x1F;
                                     println!("NAL type: {}", nal_type);
                                     log_to_file_vec(&buffer.to_vec());
-                                   // break;
-                                   
+                                    // break;
+                                    
                                 } else {
                                     println!("No H.264 start code found");
                                 }
@@ -152,17 +193,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
-
-    // Run GUI (blocks until window closes)
-    let event_loop = EventLoop::new()?;
-    let mut app = App { 
-        pixels: None,
-        frame_receiver: Some(frame_receiver),
-    };
-    
-    event_loop.run_app(&mut app)?;
-
-    udp_thread.join().unwrap();
-    
-    Ok(())
+    handler
 }
