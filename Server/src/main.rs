@@ -71,6 +71,7 @@ static GLOBAL_QUEUE: Lazy<Arc<Mutex<VecDeque<Vec<u8>>>>> =
             }
 
             let item: Option<Vec<u8>> = {
+                //println!("{}",GLOBAL_QUEUE.lock().unwrap().len());
                 let mut q = GLOBAL_QUEUE.lock().unwrap();
                 q.pop_front()
             };
@@ -82,7 +83,7 @@ static GLOBAL_QUEUE: Lazy<Arc<Mutex<VecDeque<Vec<u8>>>>> =
             };
         
 
-            thread::sleep(Duration::from_millis(33));
+            thread::sleep(Duration::from_millis(10));
         }
     });
 

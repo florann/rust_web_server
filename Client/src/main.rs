@@ -1,3 +1,4 @@
+use core::time;
 use std::collections::VecDeque;
 use std::process::exit;
 use std::sync::mpsc::Sender;
@@ -7,6 +8,7 @@ use std::{fs::OpenOptions, net::UdpSocket, sync::mpsc, thread, time::Duration};
 use std::io::Write; 
 
 use once_cell::sync::Lazy;
+use openh264::decoder;
 use winit::{
     application::ApplicationHandler, event::WindowEvent, event_loop::{ActiveEventLoop, EventLoop}, window::{Window, WindowId}
 };
@@ -15,34 +17,6 @@ use pixels::{Pixels, SurfaceTexture};
 
 static GLOBAL_QUEUE: Lazy<Arc<Mutex<VecDeque<Vec<u8>>>>> = 
     Lazy::new(|| Arc::new(Mutex::new(VecDeque::new())));
-
-fn log_to_file(message: &str) {
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)  // Append instead of overwrite
-        .open("./log/debug.log")
-        .unwrap();
-    
-    writeln!(file, "{}", message).unwrap();
-}
-
-fn log_to_file_vec(message: &Vec<u8>) {
-    let message_clone = message.clone();
-    let handle = thread::spawn(move|| {
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)  // Append instead of overwrite
-            .open("./log/debug.log")
-            .unwrap();
-        
-        println!("Log in file");
-        writeln!(file, "{:?}", message_clone).unwrap();
-        writeln!(file, "---").unwrap(); // Separator line
-        file.flush().unwrap(); // Force write to disk
-    });
-
-    //handle.join().unwrap(); // Wait for thread to finish
-}
 
 struct App <'a>{
       pixels: Option<Pixels<'a>>,
@@ -82,42 +56,52 @@ impl<'a>  ApplicationHandler for App<'a> {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (frame_sender, frame_receiver) = mpsc::channel::<Vec<u8>>();
-    let shared_sender = Arc::new(Mutex::new(frame_sender));
+    let (worker_sender1, worker_receiver1) = mpsc::channel::<Vec<u8>>();
+    let (worker_sender2, worker_receiver2) = mpsc::channel::<Vec<u8>>();
 
+
+    let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
+    
+    // Server address (adjust IP if server is on different machine)
+    let server_addr = "127.0.0.1:8080";
+    
+    // Send 1 byte to subscribe
+    let subscribe_message = [1u8]; // Single byte
+    socket.send_to(&subscribe_message, server_addr).unwrap();
+
+    //App Sender
+    let handler_display = new_display_stream_thread(frame_sender);
+    //Dispatcher 
+    let handler_receive = new_receive_thread(&socket, worker_sender1, worker_sender2);
+    //Worker
+    let handler_worker1 = new_decoder_thread(worker_receiver1);
+    let handler_worker2 = new_decoder_thread(worker_receiver2);
+
+    
     // Run GUI (blocks until window closes)
     let event_loop = EventLoop::new()?;
     let mut app = App { 
         pixels: None,
         frame_receiver: Some(frame_receiver),
     };
-
-    let frame_sender_clone = shared_sender.clone();
-    let handler_display = new_display_stream_thread(frame_sender_clone);
-
-     
-    let handler_receive = new_receive_thread();
-    let handler_receive2 = new_receive_thread();
     
-    handler_display.join().unwrap();
-    handler_receive.join().unwrap();
-    handler_receive2.join().unwrap();
-
     event_loop.run_app(&mut app)?;
     
     Ok(())
 }
 
-fn new_display_stream_thread(frame_sender: Arc<Mutex<Sender<Vec<u8>>>>) -> JoinHandle<()> {
+fn new_display_stream_thread(frame_sender: mpsc::Sender<Vec<u8>>) -> JoinHandle<()> {
     let handler = thread::spawn(move ||{
         loop {
+            thread::sleep(time::Duration::from_millis(33));
             let item = {
                 let mut q = GLOBAL_QUEUE.lock().unwrap();
                 q.pop_front()
             };
     
             if let Some(data) = item {
-                if frame_sender.lock().unwrap().send(data).is_err() {
-                    println!("Wola c'est l'erreur du 69");
+                println!("data -> sending");
+                if frame_sender.send(data).is_err() {
                     exit(1); 
                 }
             }
@@ -126,28 +110,13 @@ fn new_display_stream_thread(frame_sender: Arc<Mutex<Sender<Vec<u8>>>>) -> JoinH
     handler
 }
 
-fn new_receive_thread() -> JoinHandle<()> {
-    let mut buffer = [0u8; 1024 * 1024];
-    let mut message_count = 0;
-    let mut decoder =   Decoder::new().unwrap();
-    let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
-
-    let thread_socket = socket.try_clone().unwrap();
-    let handler = thread::spawn(move ||{
-        loop {
-            thread::sleep(Duration::from_millis(33));
-            match thread_socket.recv(&mut buffer) {
-                Ok(bytes_received) => {
-                    if bytes_received == 0 {
-                        continue;
-                    }
-
-                    message_count += 1;
-                    println!("Message #{}: {} bytes", message_count, bytes_received);
-                    
-                    let packet_data = &buffer[..bytes_received];
-                    
-                    match(decoder.decode(packet_data)) {
+fn new_decoder_thread(receiver: mpsc::Receiver<Vec<u8>>) -> JoinHandle<()> {
+    let handler = thread::spawn(move || {
+    let mut decoder = Decoder::new().unwrap();
+    loop {
+        match receiver.recv_timeout(time::Duration::from_millis(100)) {
+                Ok(packet_data) => {
+                    match(decoder.decode(&packet_data)) {
                         Ok(Some(yuv_data)) => {
 
                             println!("Frame successfully decoded: {}x{}", 
@@ -164,25 +133,41 @@ fn new_receive_thread() -> JoinHandle<()> {
                         }
                         Err(error) => {
                             println!("Decoding error: {}", error);
-                            //println!("Entire buffer dump {:?}", buffer.to_vec());
-
-                            // Check if this looks like H.264 data
-                            if bytes_received >= 4 {
-                                let nal_header = &buffer[0..4];
-                                if nal_header == &[0x00, 0x00, 0x00, 0x01] {
-                                    println!("Found H.264 start code");
-                                    let nal_type = buffer[4] & 0x1F;
-                                    println!("NAL type: {}", nal_type);
-                                    log_to_file_vec(&buffer.to_vec());
-                                    // break;
-                                    
-                                } else {
-                                    println!("No H.264 start code found");
-                                }
-                            }
                         }
                     }
+            },
+            Err(error) => {
+                //println!("Error : {}", error);
+            }
+        }
+    }});
+    handler
+}
 
+fn new_receive_thread(socket: &UdpSocket, worker_1: mpsc::Sender<Vec<u8>>, worker_2: mpsc::Sender<Vec<u8>>) -> JoinHandle<()> {
+    let mut buffer = vec![0u8; 1024 * 1024];
+    let mut message_count = 0;
+
+    let thread_socket = socket.try_clone().unwrap();
+    let handler = thread::spawn(move ||{
+        loop {
+            thread::sleep(Duration::from_millis(10));
+            match thread_socket.recv(&mut buffer) {
+                Ok(bytes_received) => {
+                    if bytes_received == 0 {
+                        continue;
+                    }
+
+                    message_count += 1;
+                    println!("Message #{}: {} bytes", message_count, bytes_received);
+                    
+                    let packet_data = &buffer[..bytes_received];
+                    if message_count % 2 == 0 {
+                        worker_1.send(packet_data.to_vec());
+                    } else {
+                        worker_2.send(packet_data.to_vec());
+                    }
+ 
 
                     println!("\n");
                 },
