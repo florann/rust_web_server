@@ -1,4 +1,5 @@
 use core::time;
+use std::cell::LazyCell;
 use std::collections::VecDeque;
 use std::process::exit;
 use std::sync::{Arc, Mutex};
@@ -9,14 +10,15 @@ use rtp::packet::Packet;
 use webrtc_util::marshal::Unmarshal;
 
 use once_cell::sync::Lazy;
-use openh264::decoder;
 use winit::{
     application::ApplicationHandler, event::WindowEvent, event_loop::{ActiveEventLoop, EventLoop}, window::{Window, WindowId}
 };
 use openh264::{decoder::Decoder};
 use pixels::{Pixels, SurfaceTexture};
 
-static GLOBAL_QUEUE: Lazy<Arc<Mutex<VecDeque<Vec<u8>>>>> = 
+static GLOBAL_RECEIVER: Lazy<Arc<Mutex<Vec<Packet>>>> = 
+    Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
+static GLOABL_SORTED: Lazy<Arc<Mutex<VecDeque<Packet>>>> = 
     Lazy::new(|| Arc::new(Mutex::new(VecDeque::new())));
 
 struct App <'a>{
@@ -96,7 +98,7 @@ fn new_display_stream_thread(frame_sender: mpsc::Sender<Vec<u8>>) -> JoinHandle<
         loop {
             thread::sleep(time::Duration::from_millis(33));
             let item = {
-                let mut q = GLOBAL_QUEUE.lock().unwrap();
+                let mut q = GLOABL_SORTED.lock().unwrap();
                 q.pop_front()
             };
     
@@ -113,27 +115,15 @@ fn new_display_stream_thread(frame_sender: mpsc::Sender<Vec<u8>>) -> JoinHandle<
 
 fn new_decoder_thread(receiver: mpsc::Receiver<Vec<u8>>) -> JoinHandle<()> {
     let handler = thread::spawn(move || {
-    let mut decoder = Decoder::new().unwrap();
     loop {
         match receiver.recv_timeout(time::Duration::from_millis(100)) {
                 Ok(packet_data) => {
 
                     let rtp_packet = Packet::unmarshal(&mut packet_data.as_slice());
-                    match(decoder.decode(&packet_data)) {
-                        Ok(Some(yuv_data)) => {
-
-                            println!("Frame successfully decoded: {}x{}", 
-                            (yuv_data.dimensions_uv().0 * 2), (yuv_data.dimensions_uv().1 * 2));
-
-                            let (height, width) = yuv_data.dimensions_uv();
-                            let mut rgba_buffer = vec![0u8; height * width * 4 *2 *2];
-
-                            yuv_data.write_rgba8(&mut rgba_buffer);
-                            GLOBAL_QUEUE.lock().unwrap().push_back(rgba_buffer);
+                    match(rtp_packet) {
+                        Ok(packet) => {
+                            GLOBAL_RECEIVER.lock().unwrap().push(packet);
                         },
-                        Ok(None) => {
-                            println!("Frame noot decoded");
-                        }
                         Err(error) => {
                             println!("Decoding error: {}", error);
                         }
@@ -145,6 +135,20 @@ fn new_decoder_thread(receiver: mpsc::Receiver<Vec<u8>>) -> JoinHandle<()> {
         }
     }});
     handler
+}
+
+async fn sort_packets(lenght: usize) {
+    if lenght >= 300 {
+        let mut packets_chunk: Vec<Packet> = GLOBAL_RECEIVER.lock().unwrap().drain(0..300).collect::<Vec<Packet>>();
+
+         for i in 0..packets_chunk.len() {
+            if i + 1 < packets_chunk.len() {
+                // if packet.header.timestamp > packets_chunk[i + 1].header.timestamp {
+
+                // }   
+            }
+        }
+    }
 }
 
 fn new_receive_thread(socket: &UdpSocket, worker_1: mpsc::Sender<Vec<u8>>, worker_2: mpsc::Sender<Vec<u8>>) -> JoinHandle<()> {
