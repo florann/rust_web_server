@@ -71,7 +71,6 @@ static GLOBAL_QUEUE: Lazy<Arc<Mutex<VecDeque<Vec<u8>>>>> =
             }
 
             let item: Option<Vec<u8>> = {
-                //println!("{}",GLOBAL_QUEUE.lock().unwrap().len());
                 let mut q = GLOBAL_QUEUE.lock().unwrap();
                 q.pop_front()
             };
@@ -90,10 +89,8 @@ static GLOBAL_QUEUE: Lazy<Arc<Mutex<VecDeque<Vec<u8>>>>> =
     handler
  }
 
-fn main() {
-
-    let arcswap_clients: Arc<arc_swap::ArcSwapAny<Arc<Vec<SocketAddr>>>> = Arc::new(ArcSwap::from_pointee(Vec::<SocketAddr>::new()));
-
+fn new_tcp_thread() -> JoinHandle<()> {
+    
     let tcp_listener = TcpListener::bind("127.0.0.1:1235").unwrap();
  
     let handle_thread_tcp = thread::spawn(move ||{
@@ -125,15 +122,19 @@ fn main() {
             }   
         } 
     });
+    handle_thread_tcp
+}
+
+fn main() {
+
+    let arcswap_clients: Arc<arc_swap::ArcSwapAny<Arc<Vec<SocketAddr>>>> = Arc::new(ArcSwap::from_pointee(Vec::<SocketAddr>::new()));
+    let (client_number_sender, client_number_receiver) = mpsc::channel::<usize>();
+    
+    CLIENT_NUMBER_SENDER.set(Mutex::new(client_number_sender)).unwrap();
+    CLIENT_NUMBER_RECEIVER.set(Mutex::new(client_number_receiver)).unwrap();
 
     let socket = UdpSocket::bind("0.0.0.0:8080").unwrap();
     socket.set_nonblocking(true).unwrap();
-    
-    let (sender, receiver) = mpsc::channel::<Vec<u8>>();
-
-    let (client_number_sender, client_number_receiver) = mpsc::channel::<usize>();
-    CLIENT_NUMBER_SENDER.set(Mutex::new(client_number_sender)).unwrap();
-    CLIENT_NUMBER_RECEIVER.set(Mutex::new(client_number_receiver)).unwrap();
 
     let primary_monitor = Monitor::primary().expect("No primary monitor");
     let settings = Settings::new(
@@ -156,10 +157,8 @@ fn main() {
     );
 
     let handle_thread_udp = new_emit_thread(arcswap_clients, socket);
-
     let handle_thread_screen_capture = new_capture_thread(&settings);
 
-    handle_thread_tcp.join().unwrap();
     handle_thread_udp.join().unwrap();
     handle_thread_screen_capture.join().unwrap();
 

@@ -64,7 +64,7 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
         }
 
         let mut frame_buffer = frame.buffer()?;
-        if let Some(encoder) = &mut self.encoder {
+         let encoded_data = if let Some(encoder) = &mut self.encoder {
 
             let mut yuv_source: YUVBuffer = YUVBuffer::new(frame_width, frame_height);
             let rgb_source: RgbaSliceU8 = RgbaSliceU8::new(frame_buffer.as_raw_buffer(), (frame_width, frame_height));
@@ -78,59 +78,63 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
 
             match encoder.encode(&yuv_source) {
                 Ok(encoded_bit_stream) => {
-                    
-                    GLOBAL_QUEUE.lock().unwrap().push_back(encoded_bit_stream.to_vec());
+                    Some(encoded_bit_stream.to_vec())
+                    //GLOBAL_QUEUE.lock().unwrap().push_back(encoded_bit_stream.to_vec());
                 },
                 Err(error) => {
                     println!("Encoding error: {}", error);
+                    None
                 }
             }
         }
+        else {
+            None
+        };
 
-        // if let Some(data) = encoded_data {
-        //     // First check if data is empty
-        //     if data.is_empty() {
-        //         println!("Empty data received from encoder");
-        //         return Ok(());
-        //     }
+        if let Some(data) = encoded_data {
+            // First check if data is empty
+            if data.is_empty() {
+                println!("Empty data received from encoder");
+                return Ok(());
+            }
 
-        //     let mut pos: usize = 0;
-        //     let mut nal_start: Option<usize> = None;
-
-        //     while pos <= data.len().saturating_sub(4) {
-        //         if Self::is_start_code(&data[pos..pos+4]) {
-        //             if let Some(start) = nal_start {
-        //                 let nal_data = data[start..pos].to_vec();
+            let mut pos: usize = 0;
+            let mut nal_start: Option<usize> = None;
+            // Fragmentation per Unit type
+            while pos <= data.len().saturating_sub(4) {
+                if Self::is_start_code(&data[pos..pos+4]) {
+                    if let Some(start) = nal_start {
+                        let nal_data = data[start..pos].to_vec();
                         
-        //                 if start + 4 < pos && start + 4 < data.len() {
-        //                     let nal_type = data[start + 4] & 0x1F;
-        //                     println!("NAL Type: {} - Size: {} bytes", nal_type, nal_data.len());
+                        if start + 4 < pos && start + 4 < data.len() {
+                            let nal_type = data[start + 4] & 0x1F;
+                            println!("NAL Type: {} - Size: {} bytes", nal_type, nal_data.len());
                             
-        //                     GLOBAL_QUEUE.lock().unwrap().push_back(nal_data);
-        //                 }
-        //             }
+                            GLOBAL_QUEUE.lock().unwrap().push_back(nal_data);
+                        }
+                    }
                     
-        //             nal_start = Some(pos);
-        //         }
-        //         pos += 1;
-        //     }
-
-        //     if let Some(start) = nal_start {
-        //         if start < data.len() {
-        //             let nal_data = data[start..].to_vec();
-        //             if start + 4 < data.len() && !nal_data.is_empty() {
-        //                 let nal_type = data[start + 4] & 0x1F;
-        //                 println!("NAL Type: {} - Size: {} bytes", nal_type, nal_data.len());
-        //                 // Send to buffer
-        //                 GLOBAL_QUEUE.lock().unwrap().push_back(nal_data);
-        //             } else if !nal_data.is_empty() {
-        //                 println!("Sending NAL unit without type info - Size: {} bytes", nal_data.len());
-        //                 // Send to buffer
-        //                 GLOBAL_QUEUE.lock().unwrap().push_back(nal_data);
-        //             }
-        //         }
-        //     }
-        // }
+                    nal_start = Some(pos);
+                }
+                pos += 1;
+            }
+            // Handling last NAL Unit 
+            if let Some(start) = nal_start {
+                if start < data.len() {
+                    let nal_data = data[start..].to_vec();
+                    if start + 4 < data.len() && !nal_data.is_empty() {
+                        let nal_type = data[start + 4] & 0x1F;
+                        println!("NAL Type: {} - Size: {} bytes", nal_type, nal_data.len());
+                        // Send to buffer
+                        GLOBAL_QUEUE.lock().unwrap().push_back(nal_data);
+                    } else if !nal_data.is_empty() {
+                        println!("Sending NAL unit without type info - Size: {} bytes", nal_data.len());
+                        // Send to buffer
+                        GLOBAL_QUEUE.lock().unwrap().push_back(nal_data);
+                    }
+                }
+            }
+        }
 
         Ok(())
     }

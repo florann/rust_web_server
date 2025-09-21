@@ -1,11 +1,12 @@
 use core::time;
 use std::collections::VecDeque;
 use std::process::exit;
-use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::{fs::OpenOptions, net::UdpSocket, sync::mpsc, thread, time::Duration};
-use std::io::Write; 
+use std::{ net::UdpSocket, sync::mpsc, thread, time::Duration};
+
+use rtp::packet::Packet;
+use webrtc_util::marshal::Unmarshal;
 
 use once_cell::sync::Lazy;
 use openh264::decoder;
@@ -116,6 +117,8 @@ fn new_decoder_thread(receiver: mpsc::Receiver<Vec<u8>>) -> JoinHandle<()> {
     loop {
         match receiver.recv_timeout(time::Duration::from_millis(100)) {
                 Ok(packet_data) => {
+
+                    let rtp_packet = Packet::unmarshal(&mut packet_data.as_slice());
                     match(decoder.decode(&packet_data)) {
                         Ok(Some(yuv_data)) => {
 
