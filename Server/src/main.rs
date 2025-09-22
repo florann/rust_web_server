@@ -1,9 +1,11 @@
 mod models;
+use core::time;
 use std::{collections::VecDeque, io::Read, net::{SocketAddr, TcpListener, UdpSocket}, sync::{Arc, Mutex, OnceLock}, thread::{self, JoinHandle}, time::Duration};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use arc_swap::ArcSwap;
 use once_cell::sync::Lazy;
 use windows_capture::{capture::GraphicsCaptureApiHandler, monitor::Monitor, settings::{ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings, MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings}};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::models::structs::{http_message::HttpMessage, record_buffer::RecordBuffer, screen_capture::ScreenCapture};
 
@@ -76,8 +78,18 @@ static GLOBAL_QUEUE: Lazy<Arc<Mutex<VecDeque<Vec<u8>>>>> =
             };
 
             if let Some(data) = item {
+                println!("Fourth first bytes {:02x} {:02x} {:02x} {:02x} {:02x}", data[0], data[1], data[2] ,data[3],data[4]);
+                if data[4] & 0x1F != 1 {
+                    println!("NAL Type {} sent", data[4] & 0x1F);
+                }
+
+                let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+                let mut timestamped_data: Vec<u8> = Vec::new();
+                timestamped_data.extend_from_slice(&timestamp.to_be_bytes());
+                timestamped_data.extend_from_slice(&data);
+
                 for client in (**clients.load()).clone() {
-                        let _ = socket.send_to(&data, client);
+                        let _ = socket.send_to(&timestamped_data, client);
                     }
             };
         

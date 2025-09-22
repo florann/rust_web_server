@@ -1,12 +1,16 @@
 use core::time;
 use std::cell::LazyCell;
 use std::collections::VecDeque;
+use std::env::current_exe;
 use std::process::exit;
+use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::{ net::UdpSocket, sync::mpsc, thread, time::Duration};
 
-use rtp::packet::Packet;
+use openh264::{decoder, Timestamp};
+use openh264::formats::YUVBuffer;
+use rtp::packet::{self, Packet};
 use webrtc_util::marshal::Unmarshal;
 
 use once_cell::sync::Lazy;
@@ -16,14 +20,19 @@ use winit::{
 use openh264::{decoder::Decoder};
 use pixels::{Pixels, SurfaceTexture};
 
-static GLOBAL_RECEIVER: Lazy<Arc<Mutex<Vec<Packet>>>> = 
-    Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
-static GLOABL_SORTED: Lazy<Arc<Mutex<VecDeque<Packet>>>> = 
-    Lazy::new(|| Arc::new(Mutex::new(VecDeque::new())));
+static GLOBAL_BUFFER: Lazy<Arc<Mutex<Vec<(u128,Vec<u8>)>>>> = Lazy::new(|| {
+    Arc::new(Mutex::new(Vec::new())) 
+});
+
+static GLOBAL_SORTED: Lazy<Arc<Mutex<VecDeque<(u128,Vec<u8>)>>>> = Lazy::new(|| {
+    Arc::new(Mutex::new(VecDeque::new())) 
+});
+
 
 struct App <'a>{
-      pixels: Option<Pixels<'a>>,
-      frame_receiver: Option<mpsc::Receiver<Vec<u8>>>,
+    pixels: Option<Pixels<'a>>,
+    decoder: Decoder,
+    window: Option<Arc<Window>>
 }
 
 impl<'a>  ApplicationHandler for App<'a> {
@@ -33,59 +42,167 @@ impl<'a>  ApplicationHandler for App<'a> {
                 .with_title("Video Stream")
         ).unwrap();
         
-             // Create SurfaceTexture from window
-        let surface_texture = SurfaceTexture::new(1920, 1080, window);
+        let arc_window: Arc<Window> = Arc::new(window);
+        
+        // Create SurfaceTexture from window
+        let surface_texture = SurfaceTexture::new(1920, 1080, arc_window.clone());
         
         // Pass SurfaceTexture to Pixels::new()
         let pixels = Pixels::new(1920, 1080, surface_texture).unwrap();
+        
 
         self.pixels = Some(pixels);
+        self.window = Some(arc_window);
     }
-    
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Update your pixel buffer
+        self.update();
+        
+        // Draw to the screen
+        self.draw();
+        
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+    }
+
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
-        // Handle events
-            if let Some(pixels) = &mut self.pixels {
-                // Check for new frames
-                if let Some(receiver) = &self.frame_receiver {
-                    if let Ok(frame_data) = receiver.try_recv() {
-                        // Update pixel buffer with new frame
-                        pixels.frame_mut().copy_from_slice(&frame_data);
-                    }
-                }
-                pixels.render().unwrap();
+       match event {
+            WindowEvent::CloseRequested => {
+                event_loop.exit();
+            },
+            _ => {}
+        }
+    }
+}
+
+impl <'a> App <'a>{
+        fn update(&mut self) {
+        // Process NAL units from the sorted queue
+        while let Some((timestamp, nal_data)) = GLOBAL_SORTED.lock().unwrap().pop_front() {
+            let nal_type = nal_data[3] & 0x1F;
+
+            if nal_type != 1 {
+                
+                println!("NAL Type : {}", nal_type);
+
             }
+            // println!("Fourth first bytes: {:02x} {:02x} {:02x} {:02x} ", nal_data[0], nal_data[1], nal_data[2], nal_data[3]);
+
+            // println!("Popping data sorted buffer");
+            // Feed NAL to decoder
+             match self.decoder.decode(&nal_data) {
+                    Ok(Some(yuv_frame)) => {// Convert YUV to RGB and update pixel buffer
+
+
+                    if let Some(pixels) = &mut self.pixels {
+                        let frame_buffer = pixels.frame_mut();
+                        yuv_frame.write_rgba8(frame_buffer);
+                    }
+                    break; // Process one frame per update
+                },
+                Ok(None) => {
+                    println!("None return");
+                }
+                Err(err) => {
+                    //println!("Decoding error : {}", err);
+                }
+            }
+
+        }
+    }
+
+    fn draw(&mut self) {
+        if let Some(pixels) = &mut self.pixels {
+            // Render the pixel buffer to screen
+            pixels.render().unwrap();
+        }
     }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+
     let (frame_sender, frame_receiver) = mpsc::channel::<Vec<u8>>();
-    let (worker_sender1, worker_receiver1) = mpsc::channel::<Vec<u8>>();
-    let (worker_sender2, worker_receiver2) = mpsc::channel::<Vec<u8>>();
+    let (sort_sender, sort_receiver) = mpsc::channel::<()>();
 
 
     let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
-    
-    // Server address (adjust IP if server is on different machine)
     let server_addr = "127.0.0.1:8080";
     
     // Send 1 byte to subscribe
     let subscribe_message = [1u8]; // Single byte
     socket.send_to(&subscribe_message, server_addr).unwrap();
 
-    //App Sender
-    let handler_display = new_display_stream_thread(frame_sender);
-    //Dispatcher 
-    let handler_receive = new_receive_thread(&socket, worker_sender1, worker_sender2);
-    //Worker
-    let handler_worker1 = new_decoder_thread(worker_receiver1);
-    let handler_worker2 = new_decoder_thread(worker_receiver2);
+    //Thread to receive data 
+        // Receive raw data 
+        // Store them in global queue
+            // -> Check the first 16 bytes ( timestamp of the frame ) Before check their orders
+    //Thread to lookup and display frames
+    let copy_sort_sender = sort_sender.clone();
 
-    
+    let handler_receiver_thread = thread::spawn(move ||{
+        let mut udp_buffer = vec![0u8; 65535];
+        
+        loop {
+            match socket.recv(&mut udp_buffer) {
+                Ok(nb_bytes) => {
+                    //println!("Receiving message size : {}", nb_bytes);
+                    //Getting timestamp 
+                    let timestamp = u128::from_be_bytes(
+                        udp_buffer[0..16].try_into().unwrap()
+                    );
+                    
+                    let nal_data = udp_buffer[16..nb_bytes].to_vec();
+
+                    if nal_data[4] & 0x1F != 1 {
+                        println!("NAL Type Received : {}", nal_data[4] & 0x1F);
+                    }
+
+                    let tuple = (timestamp, nal_data);
+                    GLOBAL_BUFFER.lock().unwrap().push(tuple);
+
+                    if GLOBAL_BUFFER.lock().unwrap().len() > 300 {
+                        println!("Sorting");
+                        copy_sort_sender.send(()).ok();
+                    }
+                },
+                Err(error) => {
+                      eprintln!("Socket recv error: {}", error);
+                }
+            }
+        }
+    });
+
+    let handler_sorter_thread = thread::spawn(move ||{
+        loop {
+            match sort_receiver.recv() {
+                Ok(()) => {
+                    println!("thread sorting");
+                    let mut buffer = GLOBAL_BUFFER.lock().unwrap();
+                    if(buffer.len() > 300)
+                    {
+                        let mut global_buffer_drain: Vec<(u128, Vec<u8>)> = buffer.drain(0..301).collect();
+                        drop(buffer);
+
+                        global_buffer_drain.sort_by_key(|key| key.0);
+                        println!("Filling sorted buffer");
+                        GLOBAL_SORTED.lock().unwrap().extend(global_buffer_drain);
+                    }
+                }, 
+                Err(err) => {
+                    println!("Try receive error {}", err);
+                }
+            } 
+        }
+    });
+
     // Run GUI (blocks until window closes)
     let event_loop = EventLoop::new()?;
     let mut app = App { 
         pixels: None,
-        frame_receiver: Some(frame_receiver),
+        decoder: Decoder::new().unwrap(),
+        window: None
     };
     
     event_loop.run_app(&mut app)?;
@@ -93,97 +210,3 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn new_display_stream_thread(frame_sender: mpsc::Sender<Vec<u8>>) -> JoinHandle<()> {
-    let handler = thread::spawn(move ||{
-        loop {
-            thread::sleep(time::Duration::from_millis(33));
-            let item = {
-                let mut q = GLOABL_SORTED.lock().unwrap();
-                q.pop_front()
-            };
-    
-            if let Some(data) = item {
-                println!("data -> sending");
-                if frame_sender.send(data).is_err() {
-                    exit(1); 
-                }
-            }
-        }
-    });
-    handler
-}
-
-fn new_decoder_thread(receiver: mpsc::Receiver<Vec<u8>>) -> JoinHandle<()> {
-    let handler = thread::spawn(move || {
-    loop {
-        match receiver.recv_timeout(time::Duration::from_millis(100)) {
-                Ok(packet_data) => {
-
-                    let rtp_packet = Packet::unmarshal(&mut packet_data.as_slice());
-                    match(rtp_packet) {
-                        Ok(packet) => {
-                            GLOBAL_RECEIVER.lock().unwrap().push(packet);
-                        },
-                        Err(error) => {
-                            println!("Decoding error: {}", error);
-                        }
-                    }
-            },
-            Err(error) => {
-                //println!("Error : {}", error);
-            }
-        }
-    }});
-    handler
-}
-
-async fn sort_packets(lenght: usize) {
-    if lenght >= 300 {
-        let mut packets_chunk: Vec<Packet> = GLOBAL_RECEIVER.lock().unwrap().drain(0..300).collect::<Vec<Packet>>();
-
-         for i in 0..packets_chunk.len() {
-            if i + 1 < packets_chunk.len() {
-                // if packet.header.timestamp > packets_chunk[i + 1].header.timestamp {
-
-                // }   
-            }
-        }
-    }
-}
-
-fn new_receive_thread(socket: &UdpSocket, worker_1: mpsc::Sender<Vec<u8>>, worker_2: mpsc::Sender<Vec<u8>>) -> JoinHandle<()> {
-    let mut buffer = vec![0u8; 1024 * 1024];
-    let mut message_count = 0;
-
-    let thread_socket = socket.try_clone().unwrap();
-    let handler = thread::spawn(move ||{
-        loop {
-            thread::sleep(Duration::from_millis(10));
-            match thread_socket.recv(&mut buffer) {
-                Ok(bytes_received) => {
-                    if bytes_received == 0 {
-                        continue;
-                    }
-
-                    message_count += 1;
-                    println!("Message #{}: {} bytes", message_count, bytes_received);
-                    
-                    let packet_data = &buffer[..bytes_received];
-                    if message_count % 2 == 0 {
-                        worker_1.send(packet_data.to_vec());
-                    } else {
-                        worker_2.send(packet_data.to_vec());
-                    }
- 
-
-                    println!("\n");
-                },
-                Err(e) => {
-                    println!("Error: {}", e);
-                    break;
-                }
-            }
-        }
-    });
-    handler
-}
