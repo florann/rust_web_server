@@ -64,7 +64,7 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
         }
 
         let mut frame_buffer = frame.buffer()?;
-         let encoded_data = if let Some(encoder) = &mut self.encoder {
+        let encoded_data = if let Some(encoder) = &mut self.encoder {
 
             let mut yuv_source: YUVBuffer = YUVBuffer::new(frame_width, frame_height);
             let rgb_source: RgbaSliceU8 = RgbaSliceU8::new(frame_buffer.as_raw_buffer(), (frame_width, frame_height));

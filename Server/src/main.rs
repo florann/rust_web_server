@@ -88,9 +88,44 @@ static GLOBAL_QUEUE: Lazy<Arc<Mutex<VecDeque<Vec<u8>>>>> =
                 timestamped_data.extend_from_slice(&timestamp.to_be_bytes());
                 timestamped_data.extend_from_slice(&data);
 
-                for client in (**clients.load()).clone() {
-                        let _ = socket.send_to(&timestamped_data, client);
+                // If packet above UDP limit, chunk
+                if timestamped_data.len() > 50000 {
+                    println!("NAL Type {} chunked", data[4] & 0x1F);
+                    let header_chunk_begin: [u8; 4] = [0x01, 0x01, 0x01, 0x0F];
+                    let header_chunk_end: [u8; 4] = [0x01, 0x01, 0x01, 0xFF];
+                    let mut header_chunk: [u8;4];
+
+                    let mut chunk_count: u8 = 0;
+                    while timestamped_data.len() > 0 {
+                        let mut chunk_size = 0;
+                        
+                        if timestamped_data.len() > 50000  
+                        { 
+                            chunk_size = 50000;
+                            header_chunk = header_chunk_begin;
+                        } 
+                        else { 
+                            chunk_size = timestamped_data.len();
+                            header_chunk = header_chunk_end;
+                        };
+
+                        let mut chunk: Vec<u8> = Vec::new();
+                        let drained: Vec<u8> = timestamped_data.drain(0..chunk_size).collect();
+
+                        chunk.extend_from_slice(&header_chunk);
+                        //chunk.push(chunk_count);
+                        chunk.extend_from_slice(&drained);
+
+                        send_to_clients(&socket, (**clients.load()).clone(), chunk);
+                        
+                        chunk_count += 1;
                     }
+                }
+                else {
+                    send_to_clients(&socket, (**clients.load()).clone(), timestamped_data);
+                }
+
+
             };
         
 
@@ -100,6 +135,12 @@ static GLOBAL_QUEUE: Lazy<Arc<Mutex<VecDeque<Vec<u8>>>>> =
 
     handler
  }
+
+fn send_to_clients(socket: &UdpSocket, clients: Vec<SocketAddr>, data: Vec<u8>) {
+       for client in clients {
+            let _ = socket.send_to(&data, client);
+        }
+}
 
 fn new_tcp_thread() -> JoinHandle<()> {
     

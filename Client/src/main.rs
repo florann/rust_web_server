@@ -3,17 +3,18 @@ use std::cell::LazyCell;
 use std::collections::VecDeque;
 use std::env::current_exe;
 use std::process::exit;
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::{ net::UdpSocket, sync::mpsc, thread, time::Duration};
 
-use openh264::{decoder, Timestamp};
+use openh264::{decoder, Error, Timestamp};
 use openh264::formats::YUVBuffer;
 use rtp::packet::{self, Packet};
 use webrtc_util::marshal::Unmarshal;
 
 use once_cell::sync::Lazy;
+use webrtc_util::vnet::chunk;
 use winit::{
     application::ApplicationHandler, event::WindowEvent, event_loop::{ActiveEventLoop, EventLoop}, window::{Window, WindowId}
 };
@@ -121,6 +122,86 @@ impl <'a> App <'a>{
     }
 }
 
+
+fn receive_packet(sender: &Sender<()>, udp_buffer: &Vec<u8>, chunk_buffer: &mut Vec<u8>,nb_bytes: usize) -> Result<(), String> {
+        //If chunked 
+        if udp_buffer.starts_with(&[0x01, 0x01, 0x01, 0x0F])
+        || udp_buffer.starts_with(&[0x01, 0x01, 0x01, 0xFF]) {
+            //Remove header
+            // If FF is receive, last packet 
+                //Put data in buffer 
+                //Send to global_receiver 
+            // Else
+                // Fill chunk_buffer
+            let data: Vec<u8> = udp_buffer[4..].to_vec(); 
+            if udp_buffer[3] == 0xFF {
+                chunk_buffer.extend_from_slice(&data);
+                let tuple = parse_received_packet(chunk_buffer, chunk_buffer.len());
+                match add_packet_to_receiver(sender, tuple) {
+                    Ok(()) => return Ok(()),
+                    Err(error) => {
+                        println!("add_packet_to_receiver - CHUNK");
+                        return Err(error);
+                    }
+                }
+            }
+            else {
+                chunk_buffer.extend_from_slice(&data);
+            }
+
+            Ok(())
+        }
+        else {
+            let tuple = parse_received_packet(udp_buffer, nb_bytes);
+            match add_packet_to_receiver(sender, tuple) {
+                Ok(()) => Ok(()),
+                Err(error) => {
+                    println!("add_packet_to_receiver");
+                    Err(error)
+                }
+            }
+        }
+}
+
+fn parse_received_packet(udp_buffer: &Vec<u8>, nb_bytes: usize) -> (u128, Vec<u8>) {
+    let timestamp = u128::from_be_bytes(
+        udp_buffer[0..16].try_into().unwrap()
+    );
+    
+    let nal_data = udp_buffer[16..nb_bytes].to_vec();
+
+    if nal_data[4] & 0x1F != 1 {
+        println!("NAL Type Received : {}", nal_data[4] & 0x1F);
+    }
+
+    (timestamp, nal_data)
+}
+
+fn add_packet_to_receiver(sender: &Sender<()>,tuple: (u128, Vec<u8>)) -> Result<(), String> {
+        match GLOBAL_BUFFER.lock() {
+            Ok(mut global_buffer) => {
+                global_buffer.push(tuple);
+            },
+            Err(err) => {
+                return Err(err.to_string());
+            }
+        }
+
+        match GLOBAL_BUFFER.lock() {
+            Ok(global_buffer) => 
+            {
+                if global_buffer.len() > 300 {
+                    println!("Sorting");
+                    sender.send(()).ok();
+                }
+            }, 
+            Err(err) => {
+                return Err(err.to_string());
+            }
+        }
+        Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (frame_sender, frame_receiver) = mpsc::channel::<Vec<u8>>();
@@ -143,29 +224,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let handler_receiver_thread = thread::spawn(move ||{
         let mut udp_buffer = vec![0u8; 65535];
-        
+        let mut chunk_buffer = vec![0u8; 65535*2];
+
         loop {
             match socket.recv(&mut udp_buffer) {
                 Ok(nb_bytes) => {
-                    //println!("Receiving message size : {}", nb_bytes);
-                    //Getting timestamp 
-                    let timestamp = u128::from_be_bytes(
-                        udp_buffer[0..16].try_into().unwrap()
-                    );
-                    
-                    let nal_data = udp_buffer[16..nb_bytes].to_vec();
-
-                    if nal_data[4] & 0x1F != 1 {
-                        println!("NAL Type Received : {}", nal_data[4] & 0x1F);
-                    }
-
-                    let tuple = (timestamp, nal_data);
-                    GLOBAL_BUFFER.lock().unwrap().push(tuple);
-
-                    if GLOBAL_BUFFER.lock().unwrap().len() > 300 {
-                        println!("Sorting");
-                        copy_sort_sender.send(()).ok();
-                    }
+                   match receive_packet(&copy_sort_sender, &udp_buffer, &mut chunk_buffer, nb_bytes) {
+                        Ok(()) => println!("Success : Receive packet OK"),
+                        Err(err) => {
+                            println!("Error : Receive packet {}", err);
+                        } 
+                   }
                 },
                 Err(error) => {
                       eprintln!("Socket recv error: {}", error);
