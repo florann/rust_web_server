@@ -90,8 +90,7 @@ impl <'a> App <'a>{
 
             }
             // println!("Fourth first bytes: {:02x} {:02x} {:02x} {:02x} ", nal_data[0], nal_data[1], nal_data[2], nal_data[3]);
-
-            // println!("Popping data sorted buffer");
+            // TODO : Analyze frame to see SPS PPS NAL 7 8
             // Feed NAL to decoder
              match self.decoder.decode(&nal_data) {
                     Ok(Some(yuv_frame)) => {// Convert YUV to RGB and update pixel buffer
@@ -107,7 +106,7 @@ impl <'a> App <'a>{
                     println!("None return");
                 }
                 Err(err) => {
-                    //println!("Decoding error : {}", err);
+                    println!("Decoding error : {}", err);
                 }
             }
 
@@ -127,23 +126,29 @@ fn receive_packet(sender: &Sender<()>, udp_buffer: &Vec<u8>, chunk_buffer: &mut 
         //If chunked 
         if udp_buffer.starts_with(&[0x01, 0x01, 0x01, 0x0F])
         || udp_buffer.starts_with(&[0x01, 0x01, 0x01, 0xFF]) {
-            //Remove header
-            // If FF is receive, last packet 
-                //Put data in buffer 
-                //Send to global_receiver 
-            // Else
-                // Fill chunk_buffer
+            //println!("First ten bytes: {:02x?}", &udp_buffer[..100]);
+
             let data: Vec<u8> = udp_buffer[4..].to_vec(); 
             if udp_buffer[3] == 0xFF {
+                //println!("Data bytes {:02x?}",data);
                 chunk_buffer.extend_from_slice(&data);
+
+                //println!("Chunkbuffer bytes {:02x?}", &chunk_buffer[0..100]);
+
                 let tuple = parse_received_packet(chunk_buffer, chunk_buffer.len());
+                chunk_buffer.clear();
                 match add_packet_to_receiver(sender, tuple) {
-                    Ok(()) => return Ok(()),
+                    Ok(()) => 
+                    {
+                        //println!("Succes : add_packet_to_receiver - CHUNK");
+                        return Ok(())
+                    },
                     Err(error) => {
-                        println!("add_packet_to_receiver - CHUNK");
+                        //println!("Error : add_packet_to_receiver - CHUNK");
                         return Err(error);
                     }
                 }
+               
             }
             else {
                 chunk_buffer.extend_from_slice(&data);
@@ -154,9 +159,12 @@ fn receive_packet(sender: &Sender<()>, udp_buffer: &Vec<u8>, chunk_buffer: &mut 
         else {
             let tuple = parse_received_packet(udp_buffer, nb_bytes);
             match add_packet_to_receiver(sender, tuple) {
-                Ok(()) => Ok(()),
+                Ok(()) => {
+                    println!("Succes : add_packet_to_receiver");
+                    Ok(())
+                },
                 Err(error) => {
-                    println!("add_packet_to_receiver");
+                    println!("Error : add_packet_to_receiver");
                     Err(error)
                 }
             }
@@ -181,6 +189,7 @@ fn add_packet_to_receiver(sender: &Sender<()>,tuple: (u128, Vec<u8>)) -> Result<
         match GLOBAL_BUFFER.lock() {
             Ok(mut global_buffer) => {
                 global_buffer.push(tuple);
+                println!("Data push global buffer");
             },
             Err(err) => {
                 return Err(err.to_string());
@@ -190,7 +199,7 @@ fn add_packet_to_receiver(sender: &Sender<()>,tuple: (u128, Vec<u8>)) -> Result<
         match GLOBAL_BUFFER.lock() {
             Ok(global_buffer) => 
             {
-                if global_buffer.len() > 300 {
+                if global_buffer.len() > 30 {
                     println!("Sorting");
                     sender.send(()).ok();
                 }
@@ -224,16 +233,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let handler_receiver_thread = thread::spawn(move ||{
         let mut udp_buffer = vec![0u8; 65535];
-        let mut chunk_buffer = vec![0u8; 65535*2];
+        let mut chunk_buffer = Vec::new();
+        let mut packet_number: usize = 0;
 
         loop {
             match socket.recv(&mut udp_buffer) {
                 Ok(nb_bytes) => {
+                    packet_number += 1;
                    match receive_packet(&copy_sort_sender, &udp_buffer, &mut chunk_buffer, nb_bytes) {
-                        Ok(()) => println!("Success : Receive packet OK"),
+                        Ok(()) => println!("Success : Receive packet OK : {}", packet_number),
                         Err(err) => {
                             println!("Error : Receive packet {}", err);
                         } 
+                      
                    }
                 },
                 Err(error) => {
@@ -247,11 +259,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         loop {
             match sort_receiver.recv() {
                 Ok(()) => {
-                    println!("thread sorting");
                     let mut buffer = GLOBAL_BUFFER.lock().unwrap();
-                    if(buffer.len() > 300)
+                    if buffer.len() > 30 
                     {
-                        let mut global_buffer_drain: Vec<(u128, Vec<u8>)> = buffer.drain(0..301).collect();
+                        let mut global_buffer_drain: Vec<(u128, Vec<u8>)> = buffer.drain(0..31).collect();
                         drop(buffer);
 
                         global_buffer_drain.sort_by_key(|key| key.0);

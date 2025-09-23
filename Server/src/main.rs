@@ -90,12 +90,12 @@ static GLOBAL_QUEUE: Lazy<Arc<Mutex<VecDeque<Vec<u8>>>>> =
 
                 // If packet above UDP limit, chunk
                 if timestamped_data.len() > 50000 {
+                    println!("Timestamp bytes format {:02x?}", &timestamp.to_be_bytes());
                     println!("NAL Type {} chunked", data[4] & 0x1F);
                     let header_chunk_begin: [u8; 4] = [0x01, 0x01, 0x01, 0x0F];
                     let header_chunk_end: [u8; 4] = [0x01, 0x01, 0x01, 0xFF];
                     let mut header_chunk: [u8;4];
 
-                    let mut chunk_count: u8 = 0;
                     while timestamped_data.len() > 0 {
                         let mut chunk_size = 0;
                         
@@ -117,8 +117,6 @@ static GLOBAL_QUEUE: Lazy<Arc<Mutex<VecDeque<Vec<u8>>>>> =
                         chunk.extend_from_slice(&drained);
 
                         send_to_clients(&socket, (**clients.load()).clone(), chunk);
-                        
-                        chunk_count += 1;
                     }
                 }
                 else {
