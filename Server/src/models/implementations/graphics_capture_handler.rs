@@ -1,17 +1,10 @@
 use std::io::{self, Write};
-use std::os::raw;
-use std::sync::Arc;
-use std::time::Instant;
-use openh264::encoder::{self, Encoder};
-use openh264::formats::{RGBSource, RgbaSliceU8, YUVBuffer, YUVSource};
+use openh264::encoder::{Encoder};
+use openh264::formats::{RgbaSliceU8, YUVBuffer};
 use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
-use windows_capture::encoder::{
-    AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder,
-};
 use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::InternalCaptureControl;
 use windows_capture::settings::ColorFormat;
-use crate::models::structs::rgba_pixel::RgbaPixel;
 use crate::models::structs::screen_capture::ScreenCapture;
 use crate::CLIENT_NUMBER_RECEIVER;
 use crate::GLOBAL_QUEUE;
@@ -79,7 +72,6 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
             match encoder.encode(&yuv_source) {
                 Ok(encoded_bit_stream) => {
                     Some(encoded_bit_stream.to_vec())
-                    //GLOBAL_QUEUE.lock().unwrap().push_back(encoded_bit_stream.to_vec());
                 },
                 Err(error) => {
                     println!("Encoding error: {}", error);

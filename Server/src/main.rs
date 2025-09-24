@@ -1,5 +1,4 @@
 mod models;
-use core::time;
 use std::{collections::VecDeque, io::Read, net::{SocketAddr, TcpListener, UdpSocket}, sync::{Arc, Mutex, OnceLock}, thread::{self, JoinHandle}, time::Duration};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use arc_swap::ArcSwap;
@@ -9,12 +8,17 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::models::structs::{http_message::HttpMessage, record_buffer::RecordBuffer, screen_capture::ScreenCapture};
 
-//static FRAME_SENDER: OnceLock<Mutex<mpsc::Sender<Vec<u8>>>> = OnceLock::new();
+//Global configuration variables
+static MAX_UDP_PACKET_SIZE: usize = 50000;
+
+
+//Global usable variables
 static CLIENT_NUMBER_SENDER: OnceLock<Mutex<mpsc::Sender<usize>>> = OnceLock::new();
 static CLIENT_NUMBER_RECEIVER: OnceLock<Mutex<mpsc::Receiver<usize>>> = OnceLock::new();
 static GLOBAL_QUEUE: Lazy<Arc<Mutex<VecDeque<Vec<u8>>>>> = 
     Lazy::new(|| Arc::new(Mutex::new(VecDeque::new())));
-    
+
+//Thread functions
  fn new_capture_thread(settings: &Settings<String, Monitor>) -> JoinHandle<()> {
     let settings_clone = settings.clone();
     let handler = thread::spawn(move ||{
@@ -26,7 +30,6 @@ static GLOBAL_QUEUE: Lazy<Arc<Mutex<VecDeque<Vec<u8>>>>> =
  }
 
  fn new_emit_thread(clients: Arc<arc_swap::ArcSwapAny<Arc<Vec<SocketAddr>>>>, socket: UdpSocket) -> JoinHandle<()> {
-    let (sender, receiver) = mpsc::channel::<Vec<u8>>();
     let mut buf = [0u8; 2];
     let client_copy = Arc::clone(&clients);
 
@@ -78,11 +81,11 @@ static GLOBAL_QUEUE: Lazy<Arc<Mutex<VecDeque<Vec<u8>>>>> =
             };
 
             if let Some(data) = item {
-                if data[4] & 0x1F != 1 {
-                    println!("Fourth first bytes {:02x} {:02x} {:02x} {:02x} {:02x}", data[0], data[1], data[2] ,data[3],data[4]);
-                    println!("NAL Type {} sent", data[4] & 0x1F);
-                    println!("NAL data {} size", data.len());
-                }
+                // if data[4] & 0x1F != 1 {
+                //     println!("Fourth first bytes {:02x} {:02x} {:02x} {:02x} {:02x}", data[0], data[1], data[2] ,data[3],data[4]);
+                //     println!("NAL Type {} sent", data[4] & 0x1F);
+                //     println!("NAL data {} size", data.len());
+                // }
 
                 let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
                 let mut timestamped_data: Vec<u8> = Vec::new();
@@ -90,20 +93,18 @@ static GLOBAL_QUEUE: Lazy<Arc<Mutex<VecDeque<Vec<u8>>>>> =
                 timestamped_data.extend_from_slice(&data);
 
                 // If packet above UDP limit, chunk
-                if timestamped_data.len() > 50000 {
+                if timestamped_data.len() > MAX_UDP_PACKET_SIZE {
       
                     let header_chunk_begin: [u8; 4] = [0x01, 0x01, 0x01, 0x0F];
                     let header_chunk_end: [u8; 4] = [0x01, 0x01, 0x01, 0xFF];
                     let mut header_chunk: [u8;4];
 
-                    let mut chunk_count = 0;
-
                     while timestamped_data.len() > 0 {
                         let mut chunk_size = 0;
                         
-                        if timestamped_data.len() > 50000  
+                        if timestamped_data.len() > MAX_UDP_PACKET_SIZE  
                         { 
-                            chunk_size = 50000;
+                            chunk_size = MAX_UDP_PACKET_SIZE;
                             header_chunk = header_chunk_begin;
                         } 
                         else { 
@@ -119,7 +120,6 @@ static GLOBAL_QUEUE: Lazy<Arc<Mutex<VecDeque<Vec<u8>>>>> =
                         chunk.extend_from_slice(&drained);
 
                         send_to_clients(&socket, (**clients.load()).clone(), chunk);
-                        chunk_count += 1;
                     }
                 }
                 else {

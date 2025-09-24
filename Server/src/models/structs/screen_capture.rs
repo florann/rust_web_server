@@ -1,4 +1,3 @@
-use std::{net::SocketAddr, sync::{Arc}};
 use openh264::encoder::Encoder;
 
 pub struct ScreenCapture {

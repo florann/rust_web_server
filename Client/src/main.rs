@@ -1,30 +1,22 @@
-use core::time;
-use std::cell::LazyCell;
 use std::collections::VecDeque;
-use std::env::current_exe;
-use std::process::exit;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::{Sender};
 use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
-use std::{ net::UdpSocket, sync::mpsc, thread, time::Duration};
-
-use openh264::{decoder, Error, Timestamp};
-use openh264::formats::YUVBuffer;
-use rtp::packet::{self, Packet};
-use webrtc_util::marshal::Unmarshal;
-
+use std::{ net::UdpSocket, sync::mpsc, thread};
 use once_cell::sync::Lazy;
-use webrtc_util::vnet::chunk;
 use winit::{
     application::ApplicationHandler, event::WindowEvent, event_loop::{ActiveEventLoop, EventLoop}, window::{Window, WindowId}
 };
 use openh264::{decoder::Decoder};
 use pixels::{Pixels, SurfaceTexture};
 
+//Global configuration variables
+static MAX_UDP_PACKET_SIZE:usize = 65535;
+static BUFFER_LEN_BEFORE_PROCESS: usize = 60;
+
+//Global usable variables
 static GLOBAL_BUFFER: Lazy<Arc<Mutex<Vec<(u128,Vec<u8>)>>>> = Lazy::new(|| {
     Arc::new(Mutex::new(Vec::new())) 
 });
-
 static GLOBAL_SORTED: Lazy<Arc<Mutex<VecDeque<(u128,Vec<u8>)>>>> = Lazy::new(|| {
     Arc::new(Mutex::new(VecDeque::new())) 
 });
@@ -83,17 +75,13 @@ impl <'a> App <'a>{
         // Process NAL units from the sorted queue
         while let Some((timestamp, nal_data)) = GLOBAL_SORTED.lock().unwrap().pop_front() {
             let nal_type = nal_data[4] & 0x1F;
-            if nal_type != 1 {
-                println!("Update frame - NAL Type : {}", nal_type);
-                println!("Update frame - Timestamp : {}", timestamp);
-                println!("Beginning nal_data: {:02x?},{:02x?},{:02x?},{:02x?},{:02x?},{:02x?},{:02x?}",
-            nal_data[0],nal_data[1],nal_data[2],nal_data[3],nal_data[4],nal_data[5],nal_data[6]);
-                
-              
-
-            }
+            // if nal_type != 1 {
+            //     println!("Update frame - NAL Type : {}", nal_type);
+            //     println!("Update frame - Timestamp : {}", timestamp);
+            //     println!("Beginning nal_data: {:02x?},{:02x?},{:02x?},{:02x?},{:02x?},{:02x?},{:02x?}",
+            // nal_data[0],nal_data[1],nal_data[2],nal_data[3],nal_data[4],nal_data[5],nal_data[6]);
+            // }
             // println!("Fourth first bytes: {:02x} {:02x} {:02x} {:02x} ", nal_data[0], nal_data[1], nal_data[2], nal_data[3]);
-            // TODO : Analyze frame to see SPS PPS NAL 7 8
             // Feed NAL to decoder
              match self.decoder.decode(&nal_data) {
                     Ok(Some(yuv_frame)) => {// Convert YUV to RGB and update pixel buffer
@@ -204,7 +192,7 @@ fn add_packet_to_receiver(sender: &Sender<()>,tuple: (u128, Vec<u8>)) -> Result<
         match GLOBAL_BUFFER.lock() {
             Ok(global_buffer) => 
             {
-                if global_buffer.len() > 30 {
+                if global_buffer.len() > BUFFER_LEN_BEFORE_PROCESS {
                     println!("Sorting");
                     sender.send(()).ok();
                 }
@@ -223,7 +211,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 
     let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
-    let server_addr = "127.0.0.1:8080";
+    let server_addr = "192.168.1.190:8080";
     
     // Send 1 byte to subscribe
     let subscribe_message = [1u8]; // Single byte
@@ -237,7 +225,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let copy_sort_sender = sort_sender.clone();
 
     let handler_receiver_thread = thread::spawn(move ||{
-        let mut udp_buffer = vec![0u8; 65535];
+        let mut udp_buffer = vec![0u8; MAX_UDP_PACKET_SIZE];
         let mut chunk_buffer = Vec::new();
         let mut packet_number: usize = 0;
 
@@ -265,7 +253,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             match sort_receiver.recv() {
                 Ok(()) => {
                     let mut buffer = GLOBAL_BUFFER.lock().unwrap();
-                    if buffer.len() > 30 
+                    if buffer.len() > BUFFER_LEN_BEFORE_PROCESS 
                     {
                         let mut global_buffer_drain: Vec<(u128, Vec<u8>)> = buffer.drain(0..31).collect();
                         drop(buffer);
