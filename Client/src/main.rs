@@ -82,11 +82,14 @@ impl <'a> App <'a>{
         fn update(&mut self) {
         // Process NAL units from the sorted queue
         while let Some((timestamp, nal_data)) = GLOBAL_SORTED.lock().unwrap().pop_front() {
-            let nal_type = nal_data[3] & 0x1F;
-
+            let nal_type = nal_data[4] & 0x1F;
             if nal_type != 1 {
+                println!("Update frame - NAL Type : {}", nal_type);
+                println!("Update frame - Timestamp : {}", timestamp);
+                println!("Beginning nal_data: {:02x?},{:02x?},{:02x?},{:02x?},{:02x?},{:02x?},{:02x?}",
+            nal_data[0],nal_data[1],nal_data[2],nal_data[3],nal_data[4],nal_data[5],nal_data[6]);
                 
-                println!("NAL Type : {}", nal_type);
+              
 
             }
             // println!("Fourth first bytes: {:02x} {:02x} {:02x} {:02x} ", nal_data[0], nal_data[1], nal_data[2], nal_data[3]);
@@ -94,7 +97,7 @@ impl <'a> App <'a>{
             // Feed NAL to decoder
              match self.decoder.decode(&nal_data) {
                     Ok(Some(yuv_frame)) => {// Convert YUV to RGB and update pixel buffer
-
+                        println!("xxxxxxx Success decoding xxxxxx");
 
                     if let Some(pixels) = &mut self.pixels {
                         let frame_buffer = pixels.frame_mut();
@@ -103,10 +106,10 @@ impl <'a> App <'a>{
                     break; // Process one frame per update
                 },
                 Ok(None) => {
-                    println!("None return");
+                    println!("--------------");
                 }
                 Err(err) => {
-                    println!("Decoding error : {}", err);
+                    println!("Error decoding  : {}", err);
                 }
             }
 
@@ -128,11 +131,11 @@ fn receive_packet(sender: &Sender<()>, udp_buffer: &Vec<u8>, chunk_buffer: &mut 
         || udp_buffer.starts_with(&[0x01, 0x01, 0x01, 0xFF]) {
             //println!("First ten bytes: {:02x?}", &udp_buffer[..100]);
 
-            let data: Vec<u8> = udp_buffer[4..].to_vec(); 
+            let data: Vec<u8> = udp_buffer[4..nb_bytes].to_vec(); 
             if udp_buffer[3] == 0xFF {
                 //println!("Data bytes {:02x?}",data);
                 chunk_buffer.extend_from_slice(&data);
-
+                println!("Size chunk final  - {}", chunk_buffer.len());
                 //println!("Chunkbuffer bytes {:02x?}", &chunk_buffer[0..100]);
 
                 let tuple = parse_received_packet(chunk_buffer, chunk_buffer.len());
@@ -151,7 +154,9 @@ fn receive_packet(sender: &Sender<()>, udp_buffer: &Vec<u8>, chunk_buffer: &mut 
                
             }
             else {
+                println!("Size chunk - {}", chunk_buffer.len());
                 chunk_buffer.extend_from_slice(&data);
+                println!("Size chunk - {}", chunk_buffer.len());
             }
 
             Ok(())
@@ -188,8 +193,8 @@ fn parse_received_packet(udp_buffer: &Vec<u8>, nb_bytes: usize) -> (u128, Vec<u8
 fn add_packet_to_receiver(sender: &Sender<()>,tuple: (u128, Vec<u8>)) -> Result<(), String> {
         match GLOBAL_BUFFER.lock() {
             Ok(mut global_buffer) => {
+                println!("NAL Type [{}] - Push to global buffer", tuple.1[4] & 0x1F);
                 global_buffer.push(tuple);
-                println!("Data push global buffer");
             },
             Err(err) => {
                 return Err(err.to_string());

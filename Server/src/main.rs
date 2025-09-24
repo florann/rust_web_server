@@ -78,9 +78,10 @@ static GLOBAL_QUEUE: Lazy<Arc<Mutex<VecDeque<Vec<u8>>>>> =
             };
 
             if let Some(data) = item {
-                println!("Fourth first bytes {:02x} {:02x} {:02x} {:02x} {:02x}", data[0], data[1], data[2] ,data[3],data[4]);
                 if data[4] & 0x1F != 1 {
+                    println!("Fourth first bytes {:02x} {:02x} {:02x} {:02x} {:02x}", data[0], data[1], data[2] ,data[3],data[4]);
                     println!("NAL Type {} sent", data[4] & 0x1F);
+                    println!("NAL data {} size", data.len());
                 }
 
                 let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
@@ -90,11 +91,12 @@ static GLOBAL_QUEUE: Lazy<Arc<Mutex<VecDeque<Vec<u8>>>>> =
 
                 // If packet above UDP limit, chunk
                 if timestamped_data.len() > 50000 {
-                    println!("Timestamp bytes format {:02x?}", &timestamp.to_be_bytes());
-                    println!("NAL Type {} chunked", data[4] & 0x1F);
+      
                     let header_chunk_begin: [u8; 4] = [0x01, 0x01, 0x01, 0x0F];
                     let header_chunk_end: [u8; 4] = [0x01, 0x01, 0x01, 0xFF];
                     let mut header_chunk: [u8;4];
+
+                    let mut chunk_count = 0;
 
                     while timestamped_data.len() > 0 {
                         let mut chunk_size = 0;
@@ -117,6 +119,7 @@ static GLOBAL_QUEUE: Lazy<Arc<Mutex<VecDeque<Vec<u8>>>>> =
                         chunk.extend_from_slice(&drained);
 
                         send_to_clients(&socket, (**clients.load()).clone(), chunk);
+                        chunk_count += 1;
                     }
                 }
                 else {
