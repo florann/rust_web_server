@@ -6,7 +6,7 @@ impl HttpMessage  {
         let mut buf = [0u8;100 * 1024];
         let nb_bytes_read = tcp_stream.read(&mut buf);
 
-        debug_println!("{}", String::from_utf8_lossy(&buf).to_string());
+        println!("{}", String::from_utf8_lossy(&buf).to_string());
         
         //Checking encoding US-ASCII
         let is_valid = buf
