@@ -6,7 +6,7 @@ pub struct StopWatch {
 } 
 
 impl StopWatch {
-    fn new() -> self {
+    fn new() -> Self {
         StopWatch {
             start_time: None,
             time_elapsed: Duration::new(0, 0)
@@ -22,7 +22,7 @@ impl StopWatch {
             Ok(start_time.elapsed())
         }
         else {
-            Err("start_time not initialized")
+            Err("start_time not initialized".to_string())
         }
     }
 

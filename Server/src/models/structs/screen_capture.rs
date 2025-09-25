@@ -104,7 +104,8 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
                 println!("Empty data received from encoder");
                 return Ok(());
             }
-
+            // TODO ; Probably send full UDP packet, without splitting by NAL unit
+            // gain of performance for encoding + sending, less global buffer locking
             let mut pos: usize = 0;
             let mut nal_start: Option<usize> = None;
             // Fragmentation per Unit type
