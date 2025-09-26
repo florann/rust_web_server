@@ -5,14 +5,17 @@ use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
 use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::InternalCaptureControl;
 use windows_capture::settings::ColorFormat;
+use crate::models::structs::stop_watch::StopWatch;
+use crate::models::structs::gpu_encoder::GpuEncoder;
 use crate::CLIENT_NUMBER_RECEIVER;
 use crate::GLOBAL_QUEUE;
 
 
 pub struct ScreenCapture {
     // The video encoder that will be used to encode the frames.
-    pub encoder: Option<Encoder>,
-    pub client_number: usize
+    pub encoder: Option<GpuEncoder>,
+    pub client_number: usize,
+    pub stop_watch: StopWatch
 }
 
 impl ScreenCapture {
@@ -38,8 +41,9 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
         println!("Created with Flags: {}", ctx.flags);
 
         Ok(Self {
-            encoder: Some(Encoder::new().unwrap()),
-            client_number: 0
+            encoder: Some(GpuEncoder::new(1920,1080).unwrap()),
+            client_number: 0,
+            stop_watch: StopWatch::new()
         })
     }
 
@@ -49,6 +53,8 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
         frame: &mut Frame,
         capture_control: InternalCaptureControl,
     ) -> Result<(), Self::Error> {
+        self.stop_watch.start();
+
         io::stdout().flush()?;
         frame.color_format();
 
@@ -61,7 +67,7 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
                 if let Ok(client_number) = client_number_receiver.try_recv() {
                     if client_number > self.client_number {
                          if let Some(encoder) = &mut self.encoder {
-                            *encoder = Encoder::new().unwrap();
+                            *encoder = GpuEncoder::new(1920,1080).unwrap();
     
                                 println!("");
                                 println!("Encoder recreation");
@@ -70,22 +76,14 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
                 }
             }
         }
-
+        println!("Before encoding data - {}", self.stop_watch);
         let mut frame_buffer = frame.buffer()?;
         let encoded_data = if let Some(encoder) = &mut self.encoder {
-
-            let mut yuv_source: YUVBuffer = YUVBuffer::new(frame_width, frame_height);
-            let rgb_source: RgbaSliceU8 = RgbaSliceU8::new(frame_buffer.as_raw_buffer(), (frame_width, frame_height));
-
-            if color_format == ColorFormat::Rgba8 {
-                yuv_source.read_rgb(rgb_source);
-            }
-            else if color_format == ColorFormat::Rgba16F {
-                return Ok(());
-            }
-
-            match encoder.encode(&yuv_source) {
+              
+            println!("Before encode - {}", self.stop_watch);
+            match encoder.encode_frame(&frame_buffer.as_raw_buffer()) {
                 Ok(encoded_bit_stream) => {
+                    println!("After encode - {}", self.stop_watch);
                     Some(encoded_bit_stream.to_vec())
                 },
                 Err(error) => {
@@ -97,6 +95,7 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
         else {
             None
         };
+   
 
         if let Some(data) = encoded_data {
             // First check if data is empty
@@ -126,6 +125,7 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
                 }
                 pos += 1;
             }
+            println!("Before last NAL unit - {}", self.stop_watch);
             // Handling last NAL Unit 
             if let Some(start) = nal_start {
                 if start < data.len() {
@@ -143,6 +143,9 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
                 }
             }
         }
+
+        self.stop_watch.stop();
+        println!("{}", self.stop_watch);
 
         Ok(())
     }
