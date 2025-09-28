@@ -15,7 +15,8 @@ pub struct ScreenCapture {
     // The video encoder that will be used to encode the frames.
     pub encoder: Option<GpuEncoder>,
     pub client_number: usize,
-    pub stop_watch: StopWatch
+    pub stop_watch: StopWatch,
+    pub frame_counter: usize
 }
 
 impl ScreenCapture {
@@ -43,7 +44,8 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
         Ok(Self {
             encoder: Some(GpuEncoder::new(1920,1080).unwrap()),
             client_number: 0,
-            stop_watch: StopWatch::new()
+            stop_watch: StopWatch::new(),
+            frame_counter: 0
         })
     }
 
@@ -53,15 +55,10 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
         frame: &mut Frame,
         capture_control: InternalCaptureControl,
     ) -> Result<(), Self::Error> {
-        self.stop_watch.start();
 
         io::stdout().flush()?;
         frame.color_format();
 
-        let color_format = frame.color_format();
-        let frame_width = frame.width() as usize;
-        let frame_height = frame.height() as usize;
-        
         if let Some(client_number_mutex) = CLIENT_NUMBER_RECEIVER.get() {
             if let Ok(client_number_receiver) = client_number_mutex.lock() {
                 if let Ok(client_number) = client_number_receiver.try_recv() {
@@ -76,14 +73,12 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
                 }
             }
         }
-        println!("Before encoding data - {}", self.stop_watch);
+        
         let mut frame_buffer = frame.buffer()?;
         let encoded_data = if let Some(encoder) = &mut self.encoder {
-              
-            println!("Before encode - {}", self.stop_watch);
             match encoder.encode_frame(&frame_buffer.as_raw_buffer()) {
                 Ok(encoded_bit_stream) => {
-                    println!("After encode - {}", self.stop_watch);
+                    println!("Size encoded - {}", encoded_bit_stream.len());
                     Some(encoded_bit_stream.to_vec())
                 },
                 Err(error) => {
@@ -96,7 +91,6 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
             None
         };
    
-
         if let Some(data) = encoded_data {
             // First check if data is empty
             if data.is_empty() {
@@ -115,6 +109,9 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
                         
                         if start + 4 < pos && start + 4 < data.len() {
                             let nal_type = data[start + 4] & 0x1F;
+                            if nal_type == 1 {
+                                self.frame_counter += 1;
+                            }
                             println!("NAL Type: {} - Size: {} bytes", nal_type, nal_data.len());
                             
                             GLOBAL_QUEUE.lock().unwrap().push_back(nal_data);
@@ -125,7 +122,7 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
                 }
                 pos += 1;
             }
-            println!("Before last NAL unit - {}", self.stop_watch);
+            
             // Handling last NAL Unit 
             if let Some(start) = nal_start {
                 if start < data.len() {
@@ -144,8 +141,7 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
             }
         }
 
-        self.stop_watch.stop();
-        println!("{}", self.stop_watch);
+        println!("Encoded frame number {}", self.frame_counter);
 
         Ok(())
     }

@@ -36,9 +36,7 @@ impl GpuEncoder {
         
         let mut encoded = Vec::new();
         if let Some(stdout) = self.child.stdout.as_mut() {
-            // TODO : Modify the buffer size, 
-            // Take into account the size of the frame encoded. Probably move the Nal UNIT splitting here 
-            let mut buffer = [0u8; 4096];
+            let mut buffer =  [0u8; 65507];
             match stdout.read(&mut buffer) {
                 Ok(n) if n > 0 => {
                     encoded.extend_from_slice(&buffer[..n]);
