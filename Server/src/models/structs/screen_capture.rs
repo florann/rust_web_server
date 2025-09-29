@@ -78,7 +78,7 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
         let encoded_data = if let Some(encoder) = &mut self.encoder {
             match encoder.encode_frame(&frame_buffer.as_raw_buffer()) {
                 Ok(encoded_bit_stream) => {
-                    println!("Size encoded - {}", encoded_bit_stream.len());
+                    //println!("Size encoded - {}", encoded_bit_stream.len());
                     Some(encoded_bit_stream.to_vec())
                 },
                 Err(error) => {
@@ -109,10 +109,13 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
                         
                         if start + 4 < pos && start + 4 < data.len() {
                             let nal_type = data[start + 4] & 0x1F;
+                            if nal_type == 7 || nal_type == 8 || nal_type == 5 {
+                                //println!("NAL Type: {} - Size: {} bytes", nal_type, nal_data.len());
+                            }
                             if nal_type == 1 {
                                 self.frame_counter += 1;
                             }
-                            println!("NAL Type: {} - Size: {} bytes", nal_type, nal_data.len());
+                            //println!("NAL Type: {} - Size: {} bytes", nal_type, nal_data.len());
                             
                             GLOBAL_QUEUE.lock().unwrap().push_back(nal_data);
                         }
@@ -129,7 +132,9 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
                     let nal_data = data[start..].to_vec();
                     if start + 4 < data.len() && !nal_data.is_empty() {
                         let nal_type = data[start + 4] & 0x1F;
-                        println!("NAL Type: {} - Size: {} bytes", nal_type, nal_data.len());
+                        if nal_type == 7 || nal_type == 8 || nal_type == 5 {
+                            //println!("NAL Type: {} - Size: {} bytes", nal_type, nal_data.len());
+                        }
                         // Send to buffer
                         GLOBAL_QUEUE.lock().unwrap().push_back(nal_data);
                     } else if !nal_data.is_empty() {
@@ -141,7 +146,7 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
             }
         }
 
-        println!("Encoded frame number {}", self.frame_counter);
+        //println!("Encoded frame number {}", self.frame_counter);
 
         Ok(())
     }

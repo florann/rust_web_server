@@ -16,6 +16,10 @@ impl GpuEncoder {
                 "-i", "-",           
                 "-c:v", "h264_amf",  // AMD Encoder
                 "-b:v", "5M",
+                "-g", "30",
+                "-forced-idr", "1",
+                "-bsf:v", "dump_extra",
+                "-flags", "+global_header",
                 "-f", "h264",        
                 "-"                  
             ])

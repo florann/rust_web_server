@@ -1,4 +1,4 @@
-use std::sync::{Arc};
+use std::{sync::Arc, thread, time::Duration};
 use winit::{
     application::ApplicationHandler, event::WindowEvent, event_loop::{ActiveEventLoop}, window::{Window, WindowId}
 };
@@ -61,16 +61,25 @@ impl <'a> App <'a>{
         // Process NAL units from the sorted queue
         while let Some((timestamp, nal_data)) = GLOBAL_SORTED.lock().unwrap().pop_front() {
             let nal_type = nal_data[4] & 0x1F;
+
+            if nal_type == 9 {
+                break;
+            }
+
+            println!("Sending to decoder {}", nal_type);
+
             // Feed NAL to decoder
              match self.decoder.decode_udp_packet(nal_data) {
                     Ok(isSuccess) => {
                         println!("xxxxxxx Success decoding xxxxxx");
                     if isSuccess {
                         if let Some(pixels) = &mut self.pixels {
-                            let mut frame_buffer = pixels.frame_mut();
                             match self.decoder.get_rgba_data() {
                                 Ok(mut rgba) => {
-                                    frame_buffer = &mut rgba;
+                                    let mut frame_buffer = pixels.frame_mut();
+                                    let copy_len = frame_buffer.len().min(rgba.len());
+                                    frame_buffer[..copy_len].copy_from_slice(&rgba[..copy_len]);
+                                    thread::sleep(Duration::from_millis(33));
                                 },
                                 Err(err) => {
     
@@ -80,11 +89,11 @@ impl <'a> App <'a>{
                         break; // Process one frame per update
                     } 
                     else {
-                        println!("Unsuccessful decoding");
+                        //println!("Unsuccessful decoding");
                     }
                 },
                 Err(err) => {
-                    println!("Error decoding  : {}", err);
+                    //println!("Error decoding  : {}", err);
                 }
             }
 

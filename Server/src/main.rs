@@ -119,6 +119,9 @@ static GLOBAL_QUEUE: Lazy<Arc<Mutex<VecDeque<Vec<u8>>>>> =
                         //chunk.push(chunk_count);
                         chunk.extend_from_slice(&drained);
 
+                        println!("Size chunk - {}", chunk.len());
+                        println!("Timestamp chunk - {}", timestamp);
+
                         send_to_clients(&socket, (**clients.load()).clone(), chunk);
                     }
                 }
