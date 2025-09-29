@@ -1,3 +1,4 @@
+use core::panic;
 use std::io::{self, Write};
 use openh264::encoder::Encoder;
 use openh264::formats::{RgbaSliceU8, YUVBuffer};
@@ -26,6 +27,32 @@ impl ScreenCapture {
         }
         false
     }
+
+    fn process_nals(&mut self, data: &[u8]) {
+        let mut pos: usize = 0;
+        let mut nal_start: Option<usize> = None;
+
+        while pos + 4 <= data.len() {
+            if Self::is_start_code(&data[pos..pos + 4]) {
+                if let Some(start) = nal_start {
+                    let nal = &data[start..pos];
+                    if start + 4 < pos {
+                        let nal_type = data[start + 4] & 0x1F;
+                        if nal_type == 1 { self.frame_counter += 1; }
+                        // enqueue nal
+                        GLOBAL_QUEUE.lock().unwrap().push_back(nal.to_vec());
+                    }
+                }
+                nal_start = Some(pos);
+            }
+            pos += 1;
+        }
+        if let Some(start) = nal_start {
+            if start < data.len() {
+                GLOBAL_QUEUE.lock().unwrap().push_back(data[start..].to_vec());
+            }
+        }
+    }
 }
 
 impl GraphicsCaptureApiHandler for ScreenCapture {
@@ -41,8 +68,18 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
         println!("Created with Flags: {}", ctx.flags);
 
+        let decoder = match GpuEncoder::new(1920,1080) {
+            Ok(decoder) => {
+                decoder
+            },
+            Err(err) => {
+                println!("Error : {}", err);
+                panic!("Decoder not initialized");
+            }
+        };
+
         Ok(Self {
-            encoder: Some(GpuEncoder::new(1920,1080).unwrap()),
+            encoder: Some(decoder),
             client_number: 0,
             stop_watch: StopWatch::new(),
             frame_counter: 0
@@ -73,79 +110,25 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
                 }
             }
         }
-        
-        let mut frame_buffer = frame.buffer()?;
-        let encoded_data = if let Some(encoder) = &mut self.encoder {
-            match encoder.encode_frame(&frame_buffer.as_raw_buffer()) {
-                Ok(encoded_bit_stream) => {
-                    //println!("Size encoded - {}", encoded_bit_stream.len());
-                    Some(encoded_bit_stream.to_vec())
-                },
-                Err(error) => {
-                    println!("Encoding error: {}", error);
-                    None
-                }
-            }
-        }
-        else {
-            None
-        };
-   
-        if let Some(data) = encoded_data {
-            // First check if data is empty
-            if data.is_empty() {
-                println!("Empty data received from encoder");
-                return Ok(());
-            }
-            // TODO ; Probably send full UDP packet, without splitting by NAL unit
-            // gain of performance for encoding + sending, less global buffer locking
-            let mut pos: usize = 0;
-            let mut nal_start: Option<usize> = None;
-            // Fragmentation per Unit type
-            while pos <= data.len().saturating_sub(4) {
-                if Self::is_start_code(&data[pos..pos+4]) {
-                    if let Some(start) = nal_start {
-                        let nal_data = data[start..pos].to_vec();
-                        
-                        if start + 4 < pos && start + 4 < data.len() {
-                            let nal_type = data[start + 4] & 0x1F;
-                            if nal_type == 7 || nal_type == 8 || nal_type == 5 {
-                                //println!("NAL Type: {} - Size: {} bytes", nal_type, nal_data.len());
-                            }
-                            if nal_type == 1 {
-                                self.frame_counter += 1;
-                            }
-                            //println!("NAL Type: {} - Size: {} bytes", nal_type, nal_data.len());
-                            
-                            GLOBAL_QUEUE.lock().unwrap().push_back(nal_data);
-                        }
-                    }
-                    
-                    nal_start = Some(pos);
-                }
-                pos += 1;
-            }
-            
-            // Handling last NAL Unit 
-            if let Some(start) = nal_start {
-                if start < data.len() {
-                    let nal_data = data[start..].to_vec();
-                    if start + 4 < data.len() && !nal_data.is_empty() {
-                        let nal_type = data[start + 4] & 0x1F;
-                        if nal_type == 7 || nal_type == 8 || nal_type == 5 {
-                            //println!("NAL Type: {} - Size: {} bytes", nal_type, nal_data.len());
-                        }
-                        // Send to buffer
-                        GLOBAL_QUEUE.lock().unwrap().push_back(nal_data);
-                    } else if !nal_data.is_empty() {
-                        println!("Sending NAL unit without type info - Size: {} bytes", nal_data.len());
-                        // Send to buffer
-                        GLOBAL_QUEUE.lock().unwrap().push_back(nal_data);
-                    }
-                }
-            }
-        }
 
+        let mut frame_buffer = frame.buffer()?;
+        let rgba = frame_buffer.as_raw_buffer();
+        if let Some(enc) = &self.encoder {
+            match enc.enqueue_frame(rgba) {
+                Ok(()) => (),
+                Err(err) => {
+                    println!("Error {}", err);
+                }
+            }
+            // pull whatever bytes are available right now (non-blocking)
+            let data = enc.take_available();
+
+            if !data.is_empty() {
+                // Your existing NAL parsing path
+                println!("Process data");
+                self.process_nals(&data);
+            }
+        }
         //println!("Encoded frame number {}", self.frame_counter);
 
         Ok(())
