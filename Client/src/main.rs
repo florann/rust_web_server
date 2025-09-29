@@ -9,7 +9,10 @@ use winit::{
 };
 use openh264::{decoder::Decoder};
 use pixels::{Pixels, SurfaceTexture};
+use ffmpeg_next as ffmpeg;
+
 use crate::models::structs::app::{self, App};
+use crate::models::structs::gpu_decoder::GpuDecoder;
 
 //Global configuration variables
 static MAX_UDP_PACKET_SIZE:usize = 65535;
@@ -186,7 +189,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = EventLoop::new()?;
     let mut app = App { 
         pixels: None,
-        decoder: Decoder::new().unwrap(),
+        decoder: GpuDecoder::new(ffmpeg::codec::Id::H264).unwrap(),
         window: None
     };
     

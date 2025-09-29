@@ -2,14 +2,15 @@ use std::sync::{Arc};
 use winit::{
     application::ApplicationHandler, event::WindowEvent, event_loop::{ActiveEventLoop}, window::{Window, WindowId}
 };
-use openh264::{decoder::Decoder};
 use pixels::{Pixels, SurfaceTexture};
+
+use crate::models::structs::gpu_decoder::GpuDecoder;
 
 use crate::GLOBAL_SORTED;
 
 pub struct App <'a>{
     pub pixels: Option<Pixels<'a>>,
-    pub decoder: Decoder,
+    pub decoder: GpuDecoder,
     pub window: Option<Arc<Window>>
 }
 
@@ -60,27 +61,28 @@ impl <'a> App <'a>{
         // Process NAL units from the sorted queue
         while let Some((timestamp, nal_data)) = GLOBAL_SORTED.lock().unwrap().pop_front() {
             let nal_type = nal_data[4] & 0x1F;
-            // if nal_type != 1 {
-            //     println!("Update frame - NAL Type : {}", nal_type);
-            //     println!("Update frame - Timestamp : {}", timestamp);
-            //     println!("Beginning nal_data: {:02x?},{:02x?},{:02x?},{:02x?},{:02x?},{:02x?},{:02x?}",
-            // nal_data[0],nal_data[1],nal_data[2],nal_data[3],nal_data[4],nal_data[5],nal_data[6]);
-            // }
-            // println!("Fourth first bytes: {:02x} {:02x} {:02x} {:02x} ", nal_data[0], nal_data[1], nal_data[2], nal_data[3]);
             // Feed NAL to decoder
-             match self.decoder.decode(&nal_data) {
-                    Ok(Some(yuv_frame)) => {// Convert YUV to RGB and update pixel buffer
+             match self.decoder.decode_udp_packet(nal_data) {
+                    Ok(isSuccess) => {
                         println!("xxxxxxx Success decoding xxxxxx");
-
-                    if let Some(pixels) = &mut self.pixels {
-                        let frame_buffer = pixels.frame_mut();
-                        yuv_frame.write_rgba8(frame_buffer);
+                    if isSuccess {
+                        if let Some(pixels) = &mut self.pixels {
+                            let mut frame_buffer = pixels.frame_mut();
+                            match self.decoder.get_rgba_data() {
+                                Ok(mut rgba) => {
+                                    frame_buffer = &mut rgba;
+                                },
+                                Err(err) => {
+    
+                                }
+                            }
+                        }
+                        break; // Process one frame per update
+                    } 
+                    else {
+                        println!("Unsuccessful decoding");
                     }
-                    break; // Process one frame per update
                 },
-                Ok(None) => {
-                    println!("--------------");
-                }
                 Err(err) => {
                     println!("Error decoding  : {}", err);
                 }
