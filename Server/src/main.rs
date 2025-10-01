@@ -6,7 +6,7 @@ use once_cell::sync::Lazy;
 use windows_capture::{capture::GraphicsCaptureApiHandler, monitor::Monitor, settings::{ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings, MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings}};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::models::structs::{http_message::HttpMessage, record_buffer::RecordBuffer, screen_capture::ScreenCapture};
+use crate::models::structs::{http_message::HttpMessage, screen_capture::ScreenCapture};
 
 //Global configuration variables
 static MAX_UDP_PACKET_SIZE: usize = 50000;
@@ -118,6 +118,9 @@ static GLOBAL_QUEUE: Lazy<Arc<Mutex<VecDeque<Vec<u8>>>>> =
                         chunk.extend_from_slice(&header_chunk);
                         //chunk.push(chunk_count);
                         chunk.extend_from_slice(&drained);
+
+                        println!("Size chunk - {}", chunk.len());
+                        println!("Timestamp chunk - {}", timestamp);
 
                         send_to_clients(&socket, (**clients.load()).clone(), chunk);
                     }
