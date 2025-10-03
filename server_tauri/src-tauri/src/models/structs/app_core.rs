@@ -1,39 +1,53 @@
-use std::{net::{SocketAddr, UdpSocket}, sync::Arc, thread::{self, JoinHandle}, time::{Duration, SystemTime}};
+use std::{collections::VecDeque, net::{SocketAddr, UdpSocket}, sync::{mpsc, Arc, Mutex, OnceLock}, thread::{self, JoinHandle}, time::{Duration, SystemTime}};
+use std::time::{UNIX_EPOCH};
 
+use once_cell::sync::Lazy;
 use windows_capture::{capture::GraphicsCaptureApiHandler, monitor::Monitor, settings::Settings};
 
 use crate::models::structs::screen_capture::ScreenCapture;
+use crate::CLIENT_NUMBER_SENDER;
+use crate::GLOBAL_QUEUE;
+use crate::MAX_UDP_PACKET_SIZE;
 
-pub struct App {
-    emit_thread: Option<JoinHandle<()>>,
-    capture_thread: Option<JoinHandle<()>>,
-    tcp_thread: Option<JoinHandle<()>>
+
+
+pub struct AppCore {
+    emit_thread: bool,
+    capture_thread: bool,
+    tcp_thread: bool
 }
 
-impl App {
+impl AppCore {
     pub fn new() -> Self {
-        App {
-            emit_thread: None, 
-            capture_thread: None,
-            tcp_thread : None
+        AppCore {
+            emit_thread: false, 
+            capture_thread: false,
+            tcp_thread : false
         }
     }
 
-    fn new_capture_thread(settings: &Settings<String, Monitor>) -> JoinHandle<()> {
+
+    pub fn tag_capture_thread_state(&mut self) {
+        self.capture_thread = true;
+    }
+
+    pub fn get_capture_thread_state(&self) -> bool {
+        self.capture_thread
+    }
+
+    pub fn new_capture_thread(&self, settings: &Settings<String, Monitor>) {
         let settings_clone = settings.clone();
-        let handler = thread::spawn(move ||{
+        thread::spawn(move ||{
             println!("Thread capture started");
             let _ = ScreenCapture::start(settings_clone);
         });
-
-        return  handler;
     }
 
-     fn new_emit_thread(&mut self, clients: Arc<arc_swap::ArcSwapAny<Arc<Vec<SocketAddr>>>>, socket: UdpSocket) -> JoinHandle<()> {
+     pub fn new_emit_thread(&mut self, clients: Arc<arc_swap::ArcSwapAny<Arc<Vec<SocketAddr>>>>, socket: UdpSocket) {
         let mut buf = [0u8; 2];
         let client_copy = Arc::clone(&clients);
 
-        let handler = thread::spawn(move ||{
+        thread::spawn(move ||{
             println!("Udp thread spawned");
             loop {
 
@@ -122,11 +136,11 @@ impl App {
                             println!("Size chunk - {}", chunk.len());
                             println!("Timestamp chunk - {}", timestamp);
 
-                            self.send_to_clients(&socket, (**clients.load()).clone(), chunk);
+                            Self::send_to_clients(&socket, (**clients.load()).clone(), chunk);
                         }
                     }
                     else {
-                        self.send_to_clients(&socket, (**clients.load()).clone(), timestamped_data);
+                        Self::send_to_clients(&socket, (**clients.load()).clone(), timestamped_data);
                     }
 
 
@@ -137,10 +151,10 @@ impl App {
             }
         });
 
-        handler
+         self.emit_thread = true;
     }
 
-    fn send_to_clients(&mut self, socket: &UdpSocket, clients: Vec<SocketAddr>, data: Vec<u8>) {
+    fn send_to_clients(socket: &UdpSocket, clients: Vec<SocketAddr>, data: Vec<u8>) {
        for client in clients {
             let _ = socket.send_to(&data, client);
         }
