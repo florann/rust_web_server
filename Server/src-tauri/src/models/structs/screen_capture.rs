@@ -1,11 +1,11 @@
 use core::panic;
 use std::io::{self, Write};
-use openh264::encoder::Encoder;
-use openh264::formats::{RgbaSliceU8, YUVBuffer};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
 use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::InternalCaptureControl;
-use windows_capture::settings::ColorFormat;
+
 use crate::models::structs::stop_watch::StopWatch;
 use crate::models::structs::gpu_encoder::GpuEncoder;
 use crate::CLIENT_NUMBER_RECEIVER;
@@ -17,7 +17,8 @@ pub struct ScreenCapture {
     pub encoder: Option<GpuEncoder>,
     pub client_number: usize,
     pub stop_watch: StopWatch,
-    pub frame_counter: usize
+    pub frame_counter: usize,
+    pub capture_thread_should_stop: Option<Arc<AtomicBool>>
 }
 
 impl ScreenCapture {
@@ -39,8 +40,8 @@ impl ScreenCapture {
                     if start + 4 < pos {
                         let nal_type = data[start + 4] & 0x1F;
                         if nal_type == 1 { self.frame_counter += 1; }
-                        // enqueue nal
-                        GLOBAL_QUEUE.lock().unwrap().push_back(nal.to_vec());
+                            // enqueue nal
+                            GLOBAL_QUEUE.lock().unwrap().push_back(nal.to_vec());
                     }
                 }
                 nal_start = Some(pos);
@@ -48,8 +49,8 @@ impl ScreenCapture {
             pos += 1;
         }
         if let Some(start) = nal_start {
-            if start < data.len() {
-                GLOBAL_QUEUE.lock().unwrap().push_back(data[start..].to_vec());
+                if start < data.len() {
+                    GLOBAL_QUEUE.lock().unwrap().push_back(data[start..].to_vec());
             }
         }
     }
@@ -57,17 +58,12 @@ impl ScreenCapture {
 
 impl GraphicsCaptureApiHandler for ScreenCapture {
     // The type of flags used to get the values from the settings.
-    type Flags = String;
-
-    // The type of error that can be returned from `CaptureControl` and `start`
-    // functions.
+    type Flags = Arc<AtomicBool>;
     type Error = Box<dyn std::error::Error + Send + Sync>;
 
     // Function that will be called to create a new instance. The flags can be
     // passed from settings.
     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
-        println!("Created with Flags: {}", ctx.flags);
-
         let decoder = match GpuEncoder::new(1920,1080) {
             Ok(decoder) => {
                 decoder
@@ -82,7 +78,8 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
             encoder: Some(decoder),
             client_number: 0,
             stop_watch: StopWatch::new(),
-            frame_counter: 0
+            frame_counter: 0,
+            capture_thread_should_stop: Some(ctx.flags)
         })
     }
 
@@ -93,6 +90,12 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
         capture_control: InternalCaptureControl,
     ) -> Result<(), Self::Error> {
 
+        if let Some(should_stop) = &self.capture_thread_should_stop {
+            if should_stop.load(Ordering::Relaxed) {
+                capture_control.stop();
+            }
+        }
+        
         io::stdout().flush()?;
         frame.color_format();
 
