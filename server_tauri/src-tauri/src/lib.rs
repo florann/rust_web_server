@@ -38,7 +38,7 @@ async fn get_capture_thread_state(app_core: SingletonType) -> Option<bool> {
 
 
 #[tauri::command]
-async fn run_capture_thread(app_core: SingletonType) {
+async fn run_capture_thread(app_core: State<'_, SingletonType>) -> Result<(), String> {
 
   let primary_monitor = Monitor::primary().expect("No primary monitor");
     let settings = Settings::new(
@@ -62,6 +62,7 @@ async fn run_capture_thread(app_core: SingletonType) {
 
     let guard = app_core.read().await;
     guard.new_capture_thread(&settings);
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -74,7 +75,7 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet])
+        .invoke_handler(tauri::generate_handler![greet, run_capture_thread])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

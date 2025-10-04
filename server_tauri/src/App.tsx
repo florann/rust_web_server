@@ -5,11 +5,16 @@ import "./App.css";
 
 function App() {
   const [greetMsg, setGreetMsg] = useState("");
+  const [blank, setRunCaptureThread] = useState("");
   const [name, setName] = useState("");
 
   async function greet() {
     // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
     setGreetMsg(await invoke("greet", { name }));
+  }
+  async function RunCaptureThread() {
+    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+    setRunCaptureThread(await invoke("run_capture_thread"));
   }
 
   return (
@@ -33,15 +38,10 @@ function App() {
         className="row"
         onSubmit={(e) => {
           e.preventDefault();
-          greet();
+          RunCaptureThread();
         }}
       >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
+        <button type="submit">Run capture</button>
       </form>
       <p>{greetMsg}</p>
     </main>
