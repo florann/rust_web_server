@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, net::{SocketAddr, UdpSocket}, sync::{mpsc, Arc, Mutex, OnceLock}, thread::{self, JoinHandle}, time::{Duration, SystemTime}};
+use std::{collections::VecDeque, net::{SocketAddr, UdpSocket}, sync::{atomic::AtomicBool, mpsc, Arc, Mutex, OnceLock}, thread::{self, JoinHandle}, time::{Duration, SystemTime}};
 use std::time::{UNIX_EPOCH};
 
 use once_cell::sync::Lazy;
@@ -12,35 +12,25 @@ use crate::MAX_UDP_PACKET_SIZE;
 
 
 pub struct AppCore {
-    emit_thread: bool,
-    capture_thread: bool,
-    tcp_thread: bool
 }
 
 impl AppCore {
     pub fn new() -> Self {
         AppCore {
-            emit_thread: false, 
-            capture_thread: false,
-            tcp_thread : false
+
         }
     }
 
+    pub fn new_capture_thread(&self, 
+        settings: &Settings<Arc<AtomicBool>, Monitor>) -> JoinHandle<()> {
 
-    pub fn tag_capture_thread_state(&mut self) {
-        self.capture_thread = true;
-    }
-
-    pub fn get_capture_thread_state(&self) -> bool {
-        self.capture_thread
-    }
-
-    pub fn new_capture_thread(&self, settings: &Settings<String, Monitor>) {
         let settings_clone = settings.clone();
-        thread::spawn(move ||{
+        let handler = thread::spawn(move ||{
             println!("Thread capture started");
             let _ = ScreenCapture::start(settings_clone);
         });
+
+        handler
     }
 
      pub fn new_emit_thread(&mut self, clients: Arc<arc_swap::ArcSwapAny<Arc<Vec<SocketAddr>>>>, socket: UdpSocket) {
@@ -150,8 +140,6 @@ impl AppCore {
                 thread::sleep(Duration::from_millis(10));
             }
         });
-
-         self.emit_thread = true;
     }
 
     fn send_to_clients(socket: &UdpSocket, clients: Vec<SocketAddr>, data: Vec<u8>) {

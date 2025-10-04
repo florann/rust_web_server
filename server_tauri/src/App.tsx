@@ -5,16 +5,26 @@ import "./App.css";
 
 function App() {
   const [greetMsg, setGreetMsg] = useState("");
+
   const [blank, setRunCaptureThread] = useState("");
+  const [returnStatus, setOffCaptureThread] = useState("");
+
+
   const [name, setName] = useState("");
 
   async function greet() {
     // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
     setGreetMsg(await invoke("greet", { name }));
   }
+
   async function RunCaptureThread() {
     // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
     setRunCaptureThread(await invoke("run_capture_thread"));
+  }
+
+  async function OffCaptureThread() {
+    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+    setOffCaptureThread(await invoke("off_thread_capture"));
   }
 
   return (
@@ -42,6 +52,15 @@ function App() {
         }}
       >
         <button type="submit">Run capture</button>
+      </form>
+      <form
+        className="row"
+        onSubmit={(e) => {
+          e.preventDefault();
+          OffCaptureThread();
+        }}
+      >
+        <button type="submit">Off capture</button>
       </form>
       <p>{greetMsg}</p>
     </main>
