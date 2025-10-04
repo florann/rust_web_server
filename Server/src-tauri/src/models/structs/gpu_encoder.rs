@@ -16,7 +16,7 @@ impl GpuEncoder {
                 "-loglevel", "error",
                 "-f", "rawvideo", "-pix_fmt", "rgba",
                 "-s", &format!("{}x{}", width, height),
-                "-r", "30",
+                "-r", "60",
                 "-i", "-",
                 "-vf", "format=nv12",
                 "-c:v", "h264_amf",
@@ -24,7 +24,7 @@ impl GpuEncoder {
                 "-rc", "cbr",
                 "-bf", "0",               // disable B-frames → earlier output
                 "-b:v", "5M",
-                "-g", "30",
+                "-g", "60",
                 "-fflags", "nobuffer",
                 "-f", "h264",
                 "-",
