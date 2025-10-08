@@ -11,3 +11,4 @@ once_cell = "1.21.3"
 rtp = "0.14.0"
 webrtc-util = "0.12.0"
 ffmpeg-next = "^8.0.0"
+clap = { version = "4.5", features = ["derive"] }

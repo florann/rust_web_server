@@ -2,18 +2,16 @@ mod models;
 use std::collections::VecDeque;
 use std::sync::mpsc::{Sender};
 use std::sync::{Arc, Mutex};
-use std::time;
 use std::{ net::UdpSocket, sync::mpsc, thread};
+use clap::Parser;
 use once_cell::sync::Lazy;
-use winit::{
-    application::ApplicationHandler, event::WindowEvent, event_loop::{ActiveEventLoop, EventLoop}, window::{Window, WindowId}
+use winit::{event_loop::{EventLoop}
 };
-use openh264::{decoder::Decoder};
-use pixels::{Pixels, SurfaceTexture};
 use ffmpeg_next as ffmpeg;
 
-use crate::models::structs::app::{self, App};
+use crate::models::structs::app::{App};
 use crate::models::structs::gpu_decoder::GpuDecoder;
+use crate::models::structs::cli::Cli;
 
 //Global configuration variables
 static MAX_UDP_PACKET_SIZE:usize = 65536;
@@ -26,7 +24,6 @@ static GLOBAL_BUFFER: Lazy<Arc<Mutex<Vec<(u128,Vec<u8>)>>>> = Lazy::new(|| {
 static GLOBAL_SORTED: Lazy<Arc<Mutex<VecDeque<(u128,Vec<u8>)>>>> = Lazy::new(|| {
     Arc::new(Mutex::new(VecDeque::new())) 
 });
-
 
 
 fn receive_packet(sender: &Sender<()>, udp_buffer: &Vec<u8>, chunk_buffer: &mut Vec<u8>,nb_bytes: usize) -> Result<(), String> {
@@ -115,25 +112,32 @@ fn add_packet_to_receiver(sender: &Sender<()>,tuple: (u128, Vec<u8>)) -> Result<
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-
-    let (frame_sender, frame_receiver) = mpsc::channel::<Vec<u8>>();
+    let cli = match Cli::try_parse() {
+        Ok(cli) => {
+            cli.ensure_argument_integrity();
+            cli
+        },
+        Err(err) => {
+            eprintln!("Unable to parse arguments : {}", err);
+            std::process::exit(1);
+        }
+    };
+    
     let (sort_sender, sort_receiver) = mpsc::channel::<()>();
 
-
     let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
-    let server_addr = "127.0.0.1:8080";
+    let server_ip = cli.server_ip.to_string();
+    let server_port = cli.port.to_string();
     
+    let server_address = format!("{}:{}",server_ip, server_port);
+
     // Send 1 byte to subscribe
     let subscribe_message = [1u8]; // Single byte
-    socket.send_to(&subscribe_message, server_addr).unwrap();
+    socket.send_to(&subscribe_message, server_address).unwrap();
 
-    //Thread to receive data 
-        // Receive raw data 
-        // Store them in global queue
-            // -> Check the first 16 bytes ( timestamp of the frame ) Before check their orders
-    //Thread to lookup and display frames
     let copy_sort_sender = sort_sender.clone();
-
+    
+    // Udp receiver thread
     let handler_receiver_thread = thread::spawn(move ||{
         let mut udp_buffer = vec![0u8; MAX_UDP_PACKET_SIZE];
         let mut chunk_buffer = Vec::new();
@@ -157,7 +161,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
-
+    // Thread to sort decoded frames
     let handler_sorter_thread = thread::spawn(move ||{
         loop {
             match sort_receiver.recv() {
