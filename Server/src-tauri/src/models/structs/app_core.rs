@@ -149,7 +149,7 @@ impl AppCore {
         handler
     }
 
-    fn send_to_clients(socket: &UdpSocket, clients: Vec<SocketAddr>, data: Vec<u8>) {
+    pub fn send_to_clients(socket: &UdpSocket, clients: Vec<SocketAddr>, data: Vec<u8>) {
        for client in clients {
             let _ = socket.send_to(&data, client);
         }
