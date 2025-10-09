@@ -1,4 +1,5 @@
-use std::{arch::x86_64::_CMP_FALSE_OQ, collections::VecDeque, sync::{atomic::{AtomicBool, Ordering}, mpsc, Arc, Mutex, OnceLock}, thread::JoinHandle};
+use std::{arch::x86_64::_CMP_FALSE_OQ, collections::VecDeque, net::{SocketAddr, UdpSocket}, sync::{atomic::{AtomicBool, Ordering}, mpsc, Arc, Mutex, OnceLock}, thread::JoinHandle};
+use arc_swap::ArcSwapAny;
 use windows_capture::{monitor::Monitor, settings::{ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings, MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings}}; 
 use tauri::State;
 use tokio::sync::RwLock;
@@ -21,6 +22,8 @@ type SingletonType = Arc<RwLock<AppCore>>;
 struct ThreadSupervisor {
     capture_thread: Option<JoinHandle<()>>,
     capture_thread_should_stop: Arc<AtomicBool>,
+    emit_thread: Option<JoinHandle<()>>,
+    emit_thread_should_stop: Arc<AtomicBool>
 }
 
 
@@ -32,7 +35,9 @@ fn greet(name: &str) -> String {
 #[tauri::command]
 async fn run_capture_thread(
     app_core: State<'_, SingletonType>,
-    thread_supervisor: State<'_, Arc<Mutex<ThreadSupervisor>>>
+    thread_supervisor: State<'_, Arc<Mutex<ThreadSupervisor>>>,
+    socket: State<'_, Arc<Mutex<UdpSocket>>>,
+    client_list: State<'_, Arc<arc_swap::ArcSwapAny<Arc<Vec<SocketAddr>>>>>
 ) -> Result<bool, String> {
 
   let primary_monitor = Monitor::primary().expect("No primary monitor");
@@ -60,6 +65,7 @@ async fn run_capture_thread(
 
     let mut lock_supervisor = thread_supervisor.lock().unwrap();
     lock_supervisor.capture_thread = Some(thread_handler);
+    lock_supervisor.emit_thread = Some(guard.new_emit_thread(client_list.inner().clone(), socket.lock().unwrap().try_clone().unwrap()));
 
     Ok(true)
 }
@@ -103,8 +109,20 @@ pub fn run() {
 
             app.manage(Arc::new(Mutex::new(ThreadSupervisor {
                 capture_thread: None,
-                capture_thread_should_stop: Arc::new(AtomicBool::new(false))
+                capture_thread_should_stop: Arc::new(AtomicBool::new(false)),
+                emit_thread: None,
+                emit_thread_should_stop: Arc::new(AtomicBool::new(false))
             })));
+
+            // Application socket initialisation
+            let socket = UdpSocket::bind("0.0.0.0:8080").unwrap();
+            socket.set_nonblocking(true).unwrap();
+
+            app.manage(Arc::new(Mutex::new(socket)));
+
+            // Client list storage
+            let clients_list: Arc<arc_swap::ArcSwapAny<Arc<Vec<SocketAddr>>>> = Arc::new(ArcSwapAny::new(Arc::new(Vec::new())));
+            app.manage(clients_list);
 
             Ok(())
         })

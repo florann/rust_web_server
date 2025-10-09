@@ -2,6 +2,7 @@ use std::{collections::VecDeque, net::{SocketAddr, UdpSocket}, sync::{atomic::At
 use std::time::{UNIX_EPOCH};
 
 use once_cell::sync::Lazy;
+use tokio::io::Join;
 use windows_capture::{capture::GraphicsCaptureApiHandler, monitor::Monitor, settings::Settings};
 
 use crate::models::structs::screen_capture::ScreenCapture;
@@ -33,11 +34,11 @@ impl AppCore {
         handler
     }
 
-     pub fn new_emit_thread(&mut self, clients: Arc<arc_swap::ArcSwapAny<Arc<Vec<SocketAddr>>>>, socket: UdpSocket) {
+    pub fn new_emit_thread(&self, clients: Arc<arc_swap::ArcSwapAny<Arc<Vec<SocketAddr>>>>, socket: UdpSocket) -> JoinHandle<()> {
         let mut buf = [0u8; 2];
         let client_copy = Arc::clone(&clients);
 
-        thread::spawn(move ||{
+        let handler = thread::spawn(move ||{
             println!("Udp thread spawned");
             loop {
 
@@ -140,9 +141,11 @@ impl AppCore {
                 thread::sleep(Duration::from_millis(10));
             }
         });
+
+        handler
     }
 
-    fn send_to_clients(socket: &UdpSocket, clients: Vec<SocketAddr>, data: Vec<u8>) {
+    pub fn send_to_clients(socket: &UdpSocket, clients: Vec<SocketAddr>, data: Vec<u8>) {
        for client in clients {
             let _ = socket.send_to(&data, client);
         }
