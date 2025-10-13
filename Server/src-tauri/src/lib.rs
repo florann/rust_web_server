@@ -23,7 +23,7 @@ struct ThreadSupervisor {
     capture_thread: Option<JoinHandle<()>>,
     capture_thread_should_stop: Arc<AtomicBool>,
     emit_thread: Option<JoinHandle<()>>,
-    emit_thread_should_stop: Arc<AtomicBool>
+    emit_thread_should_stop: Arc<AtomicBool>,
 }
 
 
@@ -36,8 +36,8 @@ fn greet(name: &str) -> String {
 async fn run_capture_thread(
     app_core: State<'_, SingletonType>,
     thread_supervisor: State<'_, Arc<Mutex<ThreadSupervisor>>>,
-    socket: State<'_, Arc<Mutex<UdpSocket>>>,
-    client_list: State<'_, Arc<arc_swap::ArcSwapAny<Arc<Vec<SocketAddr>>>>>
+    clients: State<'_, Arc<arc_swap::ArcSwapAny<Arc<Vec<SocketAddr>>>>>,
+    udp_socket: State<'_, Arc<UdpSocket>>
 ) -> Result<bool, String> {
 
   let primary_monitor = Monitor::primary().expect("No primary monitor");
@@ -60,12 +60,17 @@ async fn run_capture_thread(
         thread_supervisor.lock().unwrap().capture_thread_should_stop.clone(),
     );
 
+    // Get application
     let guard = app_core.read().await;
-    let thread_handler = guard.new_capture_thread(&settings);
-
+    
     let mut lock_supervisor = thread_supervisor.lock().unwrap();
-    lock_supervisor.capture_thread = Some(thread_handler);
-    lock_supervisor.emit_thread = Some(guard.new_emit_thread(client_list.inner().clone(), socket.lock().unwrap().try_clone().unwrap()));
+    let capture_thread_handler = guard.new_capture_thread(&settings);
+    let emit_thread_handler = guard.new_emit_thread(clients.inner().clone(), 
+    udp_socket.inner().clone(), lock_supervisor.emit_thread_should_stop.clone()); 
+
+
+    lock_supervisor.capture_thread = Some(capture_thread_handler);
+    lock_supervisor.emit_thread = Some(emit_thread_handler);
 
     Ok(true)
 }
@@ -76,12 +81,12 @@ async fn off_thread_capture(thread_supervisor: State<'_, Arc<Mutex<ThreadSupervi
     {
         Ok(mut locked_supervisor) => {
             locked_supervisor.capture_thread_should_stop.store(true, Ordering::Relaxed);
+            locked_supervisor.emit_thread_should_stop.store(true, Ordering::Relaxed);
             if let Some(capture_thread) = locked_supervisor.capture_thread.take() {
                 match capture_thread.join() {
                     Ok(_) => {
                         println!("Capture thread properly stopped");
                         locked_supervisor.capture_thread_should_stop.store(false, Ordering::Relaxed);
-                        return Ok(true)
                     },
                     Err(err) => {
                         println!("Error while stoping capture thread {:?}", err);
@@ -90,8 +95,27 @@ async fn off_thread_capture(thread_supervisor: State<'_, Arc<Mutex<ThreadSupervi
                 }
             }
             else {
-                Err("No capture thread handler".to_string())
+                return Err("No capture thread handler".to_string())
             }
+
+            if let Some(emit_thread) = locked_supervisor.emit_thread.take() {
+                match emit_thread.join() {
+                    Ok(_) => {
+                        println!("Emit thread properly stopped");
+                        locked_supervisor.emit_thread_should_stop.store(false, Ordering::Relaxed);
+                    },
+                    Err(err) => {
+                        println!("Error while stoping emit thread {:?}", err);
+                        return Err("Error while stoping emit thread".to_string())
+                    }
+                }
+            }
+            else {
+                return Err("No emit thread handler".to_string())
+            }
+
+
+            return Ok(true)
         },
         Err(err) => {
             println!("Error while locking supervisor {:?}", err);
@@ -111,18 +135,16 @@ pub fn run() {
                 capture_thread: None,
                 capture_thread_should_stop: Arc::new(AtomicBool::new(false)),
                 emit_thread: None,
-                emit_thread_should_stop: Arc::new(AtomicBool::new(false))
+                emit_thread_should_stop: Arc::new(AtomicBool::new(false)),
             })));
 
-            // Application socket initialisation
-            let socket = UdpSocket::bind("0.0.0.0:8080").unwrap();
-            socket.set_nonblocking(true).unwrap();
+            // Clients storage 
+            let clients: Arc<arc_swap::ArcSwapAny<Arc<Vec<SocketAddr>>>> = Arc::new(ArcSwapAny::new(Arc::new(Vec::new())));
+            app.manage(clients);
 
-            app.manage(Arc::new(Mutex::new(socket)));
-
-            // Client list storage
-            let clients_list: Arc<arc_swap::ArcSwapAny<Arc<Vec<SocketAddr>>>> = Arc::new(ArcSwapAny::new(Arc::new(Vec::new())));
-            app.manage(clients_list);
+            // Application socket
+            let socket: Arc<UdpSocket> = Arc::new(UdpSocket::bind("0.0.0.0:0").unwrap());
+            app.manage(socket);
 
             Ok(())
         })

@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, net::{SocketAddr, UdpSocket}, sync::{atomic::AtomicBool, mpsc, Arc, Mutex, OnceLock}, thread::{self, JoinHandle}, time::{Duration, SystemTime}};
+use std::{collections::VecDeque, net::{SocketAddr, UdpSocket}, sync::{atomic::{AtomicBool, Ordering}, mpsc, Arc, Mutex, OnceLock}, thread::{self, JoinHandle}, time::{Duration, SystemTime}};
 use std::time::{UNIX_EPOCH};
 
 use once_cell::sync::Lazy;
@@ -34,13 +34,19 @@ impl AppCore {
         handler
     }
 
-    pub fn new_emit_thread(&self, clients: Arc<arc_swap::ArcSwapAny<Arc<Vec<SocketAddr>>>>, socket: UdpSocket) -> JoinHandle<()> {
+     pub fn new_emit_thread(&self, clients: Arc<arc_swap::ArcSwapAny<Arc<Vec<SocketAddr>>>>, 
+        socket: Arc<UdpSocket>,
+        should_stop: Arc<AtomicBool>) -> JoinHandle<()> {
+
         let mut buf = [0u8; 2];
         let client_copy = Arc::clone(&clients);
 
         let handler = thread::spawn(move ||{
             println!("Udp thread spawned");
             loop {
+                if should_stop.load(Ordering::Relaxed) {
+                    break
+                }
 
                 match socket.recv_from(&mut buf) {
                     Ok((nbytes, client_addr)) => {
@@ -141,7 +147,6 @@ impl AppCore {
                 thread::sleep(Duration::from_millis(10));
             }
         });
-
         handler
     }
 
