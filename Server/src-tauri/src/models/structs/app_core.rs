@@ -37,6 +37,7 @@ impl AppCore {
      pub fn new_emit_thread(&self, clients: Arc<arc_swap::ArcSwapAny<Arc<Vec<SocketAddr>>>>, 
         socket: Arc<UdpSocket>,
         should_stop: Arc<AtomicBool>) -> JoinHandle<()> {
+
         let mut buf = [0u8; 2];
         let client_copy = Arc::clone(&clients);
 
