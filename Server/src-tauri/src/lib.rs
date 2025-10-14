@@ -81,7 +81,6 @@ async fn off_thread_capture(thread_supervisor: State<'_, Arc<Mutex<ThreadSupervi
     {
         Ok(mut locked_supervisor) => {
             locked_supervisor.capture_thread_should_stop.store(true, Ordering::Relaxed);
-            locked_supervisor.emit_thread_should_stop.store(true, Ordering::Relaxed);
             if let Some(capture_thread) = locked_supervisor.capture_thread.take() {
                 match capture_thread.join() {
                     Ok(_) => {
@@ -98,6 +97,8 @@ async fn off_thread_capture(thread_supervisor: State<'_, Arc<Mutex<ThreadSupervi
                 return Err("No capture thread handler".to_string())
             }
 
+            println!("Emit thread stop process");
+            locked_supervisor.emit_thread_should_stop.store(true, Ordering::Relaxed);
             if let Some(emit_thread) = locked_supervisor.emit_thread.take() {
                 match emit_thread.join() {
                     Ok(_) => {
@@ -131,6 +132,10 @@ pub fn run() {
             let app_core = Arc::new(RwLock::new(AppCore::new()));
             app.manage(app_core);
 
+            let (tx, rx) = mpsc::channel();
+            CLIENT_NUMBER_SENDER.set(Mutex::new(tx)).unwrap();
+            CLIENT_NUMBER_RECEIVER.set(Mutex::new(rx)).unwrap();
+
             app.manage(Arc::new(Mutex::new(ThreadSupervisor {
                 capture_thread: None,
                 capture_thread_should_stop: Arc::new(AtomicBool::new(false)),
@@ -143,7 +148,8 @@ pub fn run() {
             app.manage(clients);
 
             // Application socket
-            let socket: Arc<UdpSocket> = Arc::new(UdpSocket::bind("0.0.0.0:0").unwrap());
+            let socket: Arc<UdpSocket> = Arc::new(UdpSocket::bind("0.0.0.0:8080").unwrap());
+            socket.set_nonblocking(true)?;
             app.manage(socket);
 
             Ok(())
