@@ -40,26 +40,26 @@ impl AppCore {
 
         let mut buf = [0u8; 2];
         let client_copy = Arc::clone(&clients);
-
+        println!("Thread new_emit_thread");
         let handler = thread::spawn(move ||{
-            println!("Udp thread spawned");
+       
             loop {
                 if should_stop.load(Ordering::Relaxed) {
                     break
                 }
-
                 match socket.recv_from(&mut buf) {
                     Ok((nbytes, client_addr)) => {
                         if nbytes == 1 {
-
                                 let mut new_clients = (**client_copy.load()).clone();
                                 new_clients.push(client_addr);
                                 let clients_len = new_clients.len();
                                 client_copy.store(Arc::new(new_clients));
-
-                                if let Some(client_number_mutex) = CLIENT_NUMBER_SENDER.get() {     
+                                println!("L57");
+                                if let Some(client_number_mutex) = CLIENT_NUMBER_SENDER.get() {
+                                    println!("Get client number sender");    
                                     if let Ok(client_number) = client_number_mutex.lock() {
                                         let _ = client_number.send(clients_len);
+                                        println!("Pas ici");
                                     }
                                 }
 
@@ -82,7 +82,7 @@ impl AppCore {
                         }
                     },
                     Err(_) => {
-
+                        
                     }
                 }
 
@@ -92,11 +92,11 @@ impl AppCore {
                 };
 
                 if let Some(data) = item {
-                    // if data[4] & 0x1F != 1 {
-                    //     println!("Fourth first bytes {:02x} {:02x} {:02x} {:02x} {:02x}", data[0], data[1], data[2] ,data[3],data[4]);
-                    //     println!("NAL Type {} sent", data[4] & 0x1F);
-                    //     println!("NAL data {} size", data.len());
-                    // }
+                    //println!("Fourth first bytes {:02x} {:02x} {:02x} {:02x} {:02x}", data[0], data[1], data[2] ,data[3],data[4]);
+                    //println!("--------");
+                    if data[4] & 0x1F != 1 {
+                        println!("NAL Type {} sent", data[4] & 0x1F);
+                    }
 
                     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
                     let mut timestamped_data: Vec<u8> = Vec::new();
@@ -129,15 +129,11 @@ impl AppCore {
                             chunk.extend_from_slice(&header_chunk);
                             //chunk.push(chunk_count);
                             chunk.extend_from_slice(&drained);
-
-                            println!("Size chunk - {}", chunk.len());
-                            println!("Timestamp chunk - {}", timestamp);
-
-                            Self::send_to_clients(&socket, (**clients.load()).clone(), chunk);
+                            Self::send_to_clients(&socket, (**client_copy.load()).clone(), chunk);
                         }
                     }
                     else {
-                        Self::send_to_clients(&socket, (**clients.load()).clone(), timestamped_data);
+                        Self::send_to_clients(&socket, (**client_copy.load()).clone(), timestamped_data);
                     }
 
 
@@ -151,7 +147,7 @@ impl AppCore {
     }
 
     pub fn send_to_clients(socket: &UdpSocket, clients: Vec<SocketAddr>, data: Vec<u8>) {
-       for client in clients {
+        for client in clients { 
             let _ = socket.send_to(&data, client);
         }
     }

@@ -104,10 +104,10 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
                 if let Ok(client_number) = client_number_receiver.try_recv() {
                     if client_number > self.client_number {
                          if let Some(encoder) = &mut self.encoder {
+
+                            println!("----------------Encoder recreation------------------");
+                            self.client_number = client_number;
                             *encoder = GpuEncoder::new(1920,1080).unwrap();
-    
-                                println!("");
-                                println!("Encoder recreation");
                          }
                     } 
                 }
@@ -128,7 +128,7 @@ impl GraphicsCaptureApiHandler for ScreenCapture {
 
             if !data.is_empty() {
                 // Your existing NAL parsing path
-                println!("Process data");
+                //println!("Process data");
                 self.process_nals(&data);
             }
         }

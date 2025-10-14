@@ -20,11 +20,16 @@ impl GpuEncoder {
                 "-i", "-",
                 "-vf", "format=nv12",
                 "-c:v", "h264_amf",
-                "-usage", "lowlatency",
-                "-rc", "cbr",
-                "-bf", "0",               // disable B-frames → earlier output
-                "-b:v", "5M",
+                "-usage", "ultralowlatency",     // Changed from lowlatency
+                "-quality", "speed",             // ADD: prioritize speed
+                "-rc", "cqp",                    // Changed from cbr (try constant QP)
+                "-qp_i", "23",                   // ADD: I-frame quality
+                "-qp_p", "23",                   // ADD: P-frame quality
+                "-bf", "0",
+                "-gops_per_idr", "1",            // ADD: AMD-specific GOP setting
+                "-header_insertion_mode", "idr", // ADD: force header insertion
                 "-g", "60",
+                "-sc_threshold", "0",
                 "-fflags", "nobuffer",
                 "-f", "h264",
                 "-",
