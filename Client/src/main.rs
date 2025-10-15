@@ -1,10 +1,8 @@
 mod models;
 use std::collections::VecDeque;
-use std::sync::mpsc::{Sender};
-use std::sync::{Arc, Mutex};
-use std::{ net::UdpSocket, sync::mpsc, thread};
+use std::sync::{Arc, LazyLock, Mutex};
+use std::{ net::UdpSocket, sync::mpsc};
 use clap::Parser;
-use once_cell::sync::Lazy;
 use winit::{event_loop::{EventLoop}
 };
 use ffmpeg_next as ffmpeg;
@@ -13,105 +11,27 @@ use crate::models::structs::app::{App};
 use crate::models::structs::gpu_decoder::GpuDecoder;
 use crate::models::structs::cli::Cli;
 
+//Global server address
+static SERVER_ADDRESS: LazyLock<Arc<Mutex<Option<String>>>> = 
+    LazyLock::new(|| Arc::new(Mutex::new(None)));
+    
 //Global configuration variables
 static MAX_UDP_PACKET_SIZE:usize = 65536;
 static BUFFER_LEN_BEFORE_PROCESS: usize = 60;
 
 //Global usable variables
-static GLOBAL_BUFFER: Lazy<Arc<Mutex<Vec<(u128,Vec<u8>)>>>> = Lazy::new(|| {
+static GLOBAL_BUFFER: LazyLock<Arc<Mutex<Vec<(u128,Vec<u8>)>>>> = LazyLock::new(|| {
     Arc::new(Mutex::new(Vec::new())) 
 });
-static GLOBAL_SORTED: Lazy<Arc<Mutex<VecDeque<(u128,Vec<u8>)>>>> = Lazy::new(|| {
+static GLOBAL_SORTED: LazyLock<Arc<Mutex<VecDeque<(u128,Vec<u8>)>>>> = LazyLock::new(|| {
     Arc::new(Mutex::new(VecDeque::new())) 
 });
 
 
-fn receive_packet(sender: &Sender<()>, udp_buffer: &Vec<u8>, chunk_buffer: &mut Vec<u8>,nb_bytes: usize) -> Result<(), String> {
-        //If chunked 
-        if udp_buffer.starts_with(&[0x01, 0x01, 0x01, 0x0F])
-        || udp_buffer.starts_with(&[0x01, 0x01, 0x01, 0xFF]) {
-            //println!("First ten bytes: {:02x?}", &udp_buffer[..100]);
-
-            let data: Vec<u8> = udp_buffer[4..nb_bytes].to_vec(); 
-            if udp_buffer[3] == 0xFF {
-                //println!("Data bytes {:02x?}",data);
-                chunk_buffer.extend_from_slice(&data);
-                let tuple = parse_received_packet(chunk_buffer, chunk_buffer.len());
-                *chunk_buffer = Vec::new();
-                match add_packet_to_receiver(sender, tuple) {
-                    Ok(()) => 
-                    {
-                        //println!("Succes : add_packet_to_receiver - CHUNK");
-                        return Ok(())
-                    },
-                    Err(error) => {
-                        //println!("Error : add_packet_to_receiver - CHUNK");
-                        return Err(error);
-                    }
-                }
-               
-            }
-            else {
-                chunk_buffer.extend_from_slice(&data);
-                println!("Size chunk - {}", chunk_buffer.len());
-            }
-
-            Ok(())
-        }
-        else {
-            let tuple = parse_received_packet(udp_buffer, nb_bytes);
-            match add_packet_to_receiver(sender, tuple) {
-                Ok(()) => {
-                    Ok(())
-                },
-                Err(error) => {
-                    println!("Error : add_packet_to_receiver");
-                    Err(error)
-                }
-            }
-        }
-}
-
-fn parse_received_packet(udp_buffer: &Vec<u8>, nb_bytes: usize) -> (u128, Vec<u8>) {
-    let timestamp = u128::from_be_bytes(
-        udp_buffer[0..16].try_into().unwrap()
-    );
-    
-    let nal_data = udp_buffer[16..nb_bytes].to_vec();
-
-    if nal_data[4] & 0x1F != 1 {
-        
-    }
-
-    (timestamp, nal_data)
-}
-
-fn add_packet_to_receiver(sender: &Sender<()>,tuple: (u128, Vec<u8>)) -> Result<(), String> {
-        match GLOBAL_BUFFER.lock() {
-            Ok(mut global_buffer) => {
-                //println!("NAL Type [{}] - Push to global buffer", tuple.1[4] & 0x1F);
-                global_buffer.push(tuple);
-            },
-            Err(err) => {
-                return Err(err.to_string());
-            }
-        }
-
-        match GLOBAL_BUFFER.lock() {
-            Ok(global_buffer) => 
-            {
-                if global_buffer.len() > BUFFER_LEN_BEFORE_PROCESS {
-                    sender.send(()).ok();
-                }
-            }, 
-            Err(err) => {
-                return Err(err.to_string());
-            }
-        }
-        Ok(())
-}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+
+    // TMP: CLI integration will be erased
     let cli = match Cli::try_parse() {
         Ok(cli) => {
             cli.ensure_argument_integrity();
@@ -122,73 +42,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::process::exit(1);
         }
     };
-    
-    let (sort_sender, sort_receiver) = mpsc::channel::<()>();
 
-    let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
+    // Channel creation of threads
+    let (sort_sender, sort_receiver) = mpsc::channel::<()>();
+    // Socket creation
+    let socket = Arc::new(UdpSocket::bind("0.0.0.0:0").unwrap());
     let server_ip = cli.server_ip.to_string();
     let server_port = cli.port.to_string();
-    
-    let server_address = format!("{}:{}",server_ip, server_port);
+    // Building server address
+    *SERVER_ADDRESS.lock().unwrap() = Some(format!("{}:{}",server_ip, server_port));
 
-    // Send 1 byte to subscribe
-    let subscribe_message = [1u8]; // Single byte
-    socket.send_to(&subscribe_message, server_address).unwrap();
-
-    let copy_sort_sender = sort_sender.clone();
-    
-    // Udp receiver thread
-    let handler_receiver_thread = thread::spawn(move ||{
-        let mut udp_buffer = vec![0u8; MAX_UDP_PACKET_SIZE];
-        let mut chunk_buffer = Vec::new();
-        let mut packet_number: usize = 0;
-
-        loop {
-            match socket.recv(&mut udp_buffer) {
-                Ok(nb_bytes) => {
-                    packet_number += 1;
-                   match receive_packet(&copy_sort_sender, &udp_buffer, &mut chunk_buffer, nb_bytes) {
-                        Ok(()) => (),
-                        Err(err) => {
-                            println!("Error : Receive packet {}", err);
-                        } 
-                      
-                   }
-                },
-                Err(error) => {
-                      eprintln!("Socket recv error: {}", error);
-                }
-            }
-        }
-    });
-    // Thread to sort decoded frames
-    let handler_sorter_thread = thread::spawn(move ||{
-        loop {
-            match sort_receiver.recv() {
-                Ok(()) => {
-                    let mut buffer = GLOBAL_BUFFER.lock().unwrap();
-                    if buffer.len() > BUFFER_LEN_BEFORE_PROCESS 
-                    {
-                        let mut global_buffer_drain: Vec<(u128, Vec<u8>)> = buffer.drain(0..31).collect();
-                        drop(buffer);
-
-                        global_buffer_drain.sort_by_key(|key| key.0);
-                        GLOBAL_SORTED.lock().unwrap().extend(global_buffer_drain);
-                    }
-                }, 
-                Err(err) => {
-                    println!("Try receive error {}", err);
-                }
-            } 
-        }
-    });
 
     // Run GUI (blocks until window closes)
     let event_loop = EventLoop::new()?;
     let mut app = App { 
         pixels: None,
         decoder: GpuDecoder::new(ffmpeg::codec::Id::H264).unwrap(),
-        window: None
+        window: None,
+        socket: socket,
+        sort_receiver: sort_receiver,
+        sort_sender: sort_sender,
+        handler_sorter_thread: None,
+        handler_receiver_thread: None
     };
     
     event_loop.run_app(&mut app)?;
