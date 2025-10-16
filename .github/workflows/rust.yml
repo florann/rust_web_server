@@ -1,0 +1,66 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "main", "develop" ] 
+  pull_request:
+    branches: [ "main", "develop" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-client:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install FFmpeg dependencies
+      run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libavcodec-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libavfilter-dev \
+            libavdevice-dev \
+            libswscale-dev \
+            libswresample-dev \
+            pkg-config \
+            clang \
+            libclang-dev
+    - name: Build Client
+      working-directory: ./Client
+      run: cargo build --verbose
+  build-server:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install system dependencies
+      run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libavcodec-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libavfilter-dev \
+            libavdevice-dev \
+            libswscale-dev \
+            libswresample-dev \
+            pkg-config \
+            clang \
+            libclang-dev
+    - name: Install Tauri CLI
+      run: cargo install tauri-cli --version "^2.0.0" 
+
+    - name: Install dependancies 
+      working-directory: ./Server/src
+      run: npm install
+      
+    - name: Build Server
+      working-directory: ./Server/src
+      run: npm raun tauri dev --verbose
+

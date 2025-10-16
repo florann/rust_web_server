@@ -1,4 +1,4 @@
-[env]
+[target.x86_64-pc-windows-msvc.env]
 FFMPEG_DIR = "C:/Program Files/ffmpeg"
 PKG_CONFIG_PATH = "C:/Program Files/ffmpeg/lib/pkgconfig"
 
