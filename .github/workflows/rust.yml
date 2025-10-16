@@ -56,7 +56,11 @@ jobs:
     - name: Install Tauri CLI
       run: cargo install tauri-cli --version "^2.0.0" 
 
-    - name: Build Server
+    - name: Install dependancies 
+      working-directory: ./Server/src
+      run: npm install
+      
+    - name: Build Server Back
       working-directory: ./Server/src-tauri
       run: cargo tauri build --verbose
 
