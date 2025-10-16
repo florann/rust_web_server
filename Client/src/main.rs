@@ -54,8 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 
     // Run GUI (blocks until window closes)
-    let event_loop = EventLoop::new()?;
-    let mut app = App { 
+    let app = App { 
         pixels: None,
         decoder: GpuDecoder::new(ffmpeg::codec::Id::H264).unwrap(),
         window: None,
@@ -63,10 +62,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         sort_receiver: sort_receiver,
         sort_sender: sort_sender,
         handler_sorter_thread: None,
-        handler_receiver_thread: None
+        handler_receiver_thread: None,
+        egui_ctx: None,
+        egui_state: None,
+        egui_renderer: None,
     };
     
-    event_loop.run_app(&mut app)?;
+    app.run();
     
     Ok(())
 }
