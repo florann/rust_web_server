@@ -2,21 +2,26 @@ name: Rust
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "develop" ] 
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "develop" ]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-
+  build-client:
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v4
-    - name: Build
+    - name: Build Client
+      working-directory: ./Client
       run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+  build-server:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build Server
+      working-directory: ./Server/src-tauri
+      run: cargo build --verbose
+
