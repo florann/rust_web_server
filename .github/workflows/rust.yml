@@ -60,7 +60,7 @@ jobs:
       working-directory: ./Server/src
       run: npm install
       
-    - name: Build Server Back
-      working-directory: ./Server/src-tauri
-      run: cargo tauri build --verbose
+    - name: Build Server
+      working-directory: ./Server/src
+      run: npm raun tauri dev --verbose
 
